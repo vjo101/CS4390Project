@@ -1,5 +1,6 @@
 CC = gcc
-CFLAGS = -Wall
+CFLAGS = -Wall 
+LIBS = -lssl -lcrypto
 
 PEER_DIRS = peer1_dir peer2_dir peer3_dir
 TARGETS = peer1_dir/peer1 peer2_dir/peer2 peer3_dir/peer3
@@ -7,7 +8,7 @@ TARGETS = peer1_dir/peer1 peer2_dir/peer2 peer3_dir/peer3
 all: tracker $(TARGETS)
 
 tracker: tracker.o
-	$(CC) $(CFLAGS) -o $@ $<
+	$(CC) $(CFLAGS) -o $@ $< $(LIBS)
 
 tracker.o: tracker.c
 	$(CC) $(CFLAGS) -c $< -o $@
