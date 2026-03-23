@@ -1,11 +1,11 @@
 CC = gcc
-CFLAGS = -Wall 
+CFLAGS = -Wall
 LIBS = -lssl -lcrypto
 
 PEER_DIRS = peer1_dir peer2_dir peer3_dir
 TARGETS = peer1_dir/peer1 peer2_dir/peer2 peer3_dir/peer3
 
-all: tracker $(TARGETS)
+all: tracker peer $(TARGETS)
 
 tracker: tracker.o
 	$(CC) $(CFLAGS) -o $@ $< $(LIBS)
@@ -17,8 +17,11 @@ $(PEER_DIRS):
 	echo '$(PEER_DIRS)'
 	mkdir -p $@
 
+peer: peer.o
+	$(CC) $(CFLAGS) -o $@ $< $(LIBS)
+
 peer.o: peer.c
-	$(CC) $(CFLAGS) -c $< 
+	$(CC) $(CFLAGS) -c $<
 
 $(TARGETS): peer.o $(PEER_DIRS)
 	$(CC) $(CFLAGS) $< -o $@

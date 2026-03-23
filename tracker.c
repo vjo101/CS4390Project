@@ -11,9 +11,9 @@
 // for fork() and stuff
 #include <unistd.h>
 //for listening to torrent folder
-#include <dirent.h> 
+#include <dirent.h>
 // for mkdir and folder stuff
-#include <sys/stat.h> 
+#include <sys/stat.h>
 //timestamps
 #include <time.h>
 #include <stdint.h>
@@ -29,7 +29,7 @@
 #define DEAD_PEER_INTERVAL 900
 #define DEFAULT_PORT 3490
 
-//global directory path 
+//global directory path
 char TRACKER_DIR[256] = DEFAULT_TRACKER_DIR;
 
 //prototypes
@@ -46,13 +46,13 @@ void peer_handler(int);
 
 
 int main() {
-    // get this from config file eventually
+    // TODO: get this from config file eventually
     int server_port = 3490;
     pid_t pid;
-    struct sockaddr_in server_addr, client_addr;   
+    struct sockaddr_in server_addr, client_addr;
     // WARN: is this needed? These seem to be variables that were undeclared in the skeleton file
     //socket for spefic clients
-    int sock_child; 
+    int sock_child;
     //main listening socket
     int sockid;
 
@@ -62,41 +62,41 @@ int main() {
                DEFAULT_PORT, TRACKER_DIR);
         server_port = DEFAULT_PORT;
     }
-    
+
     // make sure torrents dir exists
     if (mkdir(TRACKER_DIR, 0755) == -1 && errno != EEXIST) {
         printf("could not create tracker directory '%s'\n", TRACKER_DIR);
         exit(1);
     }
 
-    //create TCP socket 
+    //create TCP socket
     //AF_INET = use IPv4 addresses
     if ((sockid = socket(AF_INET,SOCK_STREAM,0)) < 0){ //create socket connection oriented
         printf("socket cannot be created \n");
-        exit(1); 
+        exit(1);
     }
 
     int opt = 1;
     setsockopt(sockid, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
- 
+
     //socket created at this stage
     //now associate the socket with local port to allow listening incoming connections
     // sin_family does not need to be network byte order (htons() does this). Only sin_port and sin_addr.s_addr need it
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(server_port);
     server_addr.sin_addr.s_addr = htons(INADDR_ANY);
-    
+
     // bind and check error
     if (bind(sockid ,(struct sockaddr *) &server_addr,sizeof(server_addr)) ==-1){
         printf("bind  failure\n");
-        exit(1); 
+        exit(1);
     }
-    
+
     //(parent) process listens at sockid and check error
     if (listen(sockid, BACKLOG_LENGTH) < 0){
         printf(" Tracker  SERVER CANNOT LISTEN\n");
         exit(1);
-    }    
+    }
     printf("Tracker SERVER READY TO LISTEN INCOMING REQUEST.... \n");
 
     //accept  connection from every requester client
@@ -105,7 +105,7 @@ int main() {
         //wait until peer connects, then creates new socket (sock_child)
         if ((sock_child = accept(sockid ,(struct sockaddr *) &client_addr, &clilen))==-1){
         // accept connection and create a socket descriptor for actual work
-            printf("Tracker Cannot accept...\n"); 
+            printf("Tracker Cannot accept...\n");
             //dont kill server on failure
             continue;
         }
@@ -116,72 +116,69 @@ int main() {
         //New child process will serve the requester client. separate child will serve separate client
         if ((pid=fork())==0){
             close(sockid);   //child does not need listener
-            peer_handler(sock_child);//child is serving the client.           
+            peer_handler(sock_child);//child is serving the client.
             close (sock_child);
             // printf("\n 1. closed");
             exit(0);         // kill the process. child process all done with work
         }
         // parent all done with client, only child will communicate with that client from now
-        close(sock_child);  
-       
-    }  //accept loop ends            
-} // main fun ends  
-     
+        close(sock_child);
+
+    }  //accept loop ends
+} // main fun ends
 
 
- // function for file transfer. child process will call this function     
+ // function for file transfer. child process will call this function
 void peer_handler(int sock_child){
-    //start handiling client request    
+    //start handiling client request
     int length;
     char read_msg[MAXLINE];
 
     //read incoming message from peer
     //returns bytes read or -1 for error
-    length = read(sock_child, read_msg, MAXLINE);      
-    if (length <= 0 ) {
-        printf("failed to read from peer, or peer disconnected");
-        return;
-    }
-    
-    //null termiante string to use strcmp/strstr safely
-    read_msg[length]='\0';
 
-    printf("recieved message: %s\n", read_msg);
+    while((length = read(sock_child, read_msg, MAXLINE)) > 0){
+        //null termiante string to use strcmp/strstr safely
+        read_msg[length]='\0';
 
-    if (strstr(read_msg, "REQ LIST") != NULL || strstr(read_msg, "req list") != NULL) {//list command received
-        // TODO: req list
-        // handle_list_req(sock_child);// handle list request
-        handle_list_req(sock_child);
-        printf("list request handled.\n");
+        printf("recieved message: %s\n", read_msg);
+
+        if (strstr(read_msg, "REQ LIST") != NULL || strstr(read_msg, "req list") != NULL) {//list command received
+            // TODO: req list
+            // handle_list_req(sock_child);// handle list request
+            handle_list_req(sock_child);
+            printf("list request handled.\n");
+        }
+        else if((strstr(read_msg,"get")!=NULL)||(strstr(read_msg,"GET")!=NULL)){// get command received
+            // TODO: get function
+            // xtrct_fname(read_msg, " ");// extract filename from the command
+            // handle_get_req(sock_child, fname);
+            handle_get_req(sock_child, read_msg);
+            printf("get request handled.\n");
+        }
+        else if((strstr(read_msg,"createtracker")!=NULL)||(strstr(read_msg,"Createtracker")!=NULL)||(strstr(read_msg,"CREATETRACKER")!=NULL)){// get command received
+            // TODO: createtracker function
+            // tokenize_createmsg(read_msg);
+            // handle_createtracker_req(sock_child);
+            handle_createtracker_req(sock_child, read_msg);
+            printf("createtracker request handled.\n");
+
+        }
+        else if((strstr(read_msg,"updatetracker")!=NULL)||(strstr(read_msg,"Updatetracker")!=NULL)||(strstr(read_msg,"UPDATETRACKER")!=NULL)){// get command received
+            // TODO: update tracker function
+            // tokenize_updatemsg(read_msg);
+            // handle_updatetracker_req(sock_child);
+            handle_updatetracker_req(sock_child, read_msg);
+            printf("updatetracker request handled.\n");
+        }
+        else{
+            //unknwon commands, let peer know
+            printf("unknown command received: %s\n", read_msg);
+            send_msg(sock_child, "ERROR: unknown command\n");
+        }
+
     }
-    else if((strstr(read_msg,"get")!=NULL)||(strstr(read_msg,"GET")!=NULL)){// get command received
-        // TODO: get function
-        // xtrct_fname(read_msg, " ");// extract filename from the command        
-        // handle_get_req(sock_child, fname);  
-        handle_get_req(sock_child, read_msg);      
-        printf("get request handled.\n");
-    }
-    else if((strstr(read_msg,"createtracker")!=NULL)||(strstr(read_msg,"Createtracker")!=NULL)||(strstr(read_msg,"CREATETRACKER")!=NULL)){// get command received
-        // TODO: createtracker function
-        // tokenize_createmsg(read_msg);
-        // handle_createtracker_req(sock_child);
-        handle_createtracker_req(sock_child, read_msg);
-        printf("createtracker request handled.\n");
-        
-    }
-    else if((strstr(read_msg,"updatetracker")!=NULL)||(strstr(read_msg,"Updatetracker")!=NULL)||(strstr(read_msg,"UPDATETRACKER")!=NULL)){// get command received
-        // TODO: update tracker function
-        // tokenize_updatemsg(read_msg);
-        // handle_updatetracker_req(sock_child); 
-        handle_updatetracker_req(sock_child, read_msg);       
-        printf("updatetracker request handled.\n");
-    }
-    else{
-        //unknwon commands, let peer know
-        printf("unknown command received: %s\n", read_msg);
-        send_msg(sock_child, "ERROR: unknown command\n");
-    }
-}//end client handler function
+} //end client handler function
 
 //sends the list of all tracker files
 void handle_list_req(int sock) {
@@ -235,16 +232,16 @@ void handle_list_req(int sock) {
         //read tracker file line by line looking for filename, filezise, and md5
         while (fgets(line, sizeof(line), fp) != NULL) {
             if (strncmp(line, "Filename:", 9) == 0) {
-                //sscanf with %s reads one whitespace delimited token after Filename: 
+                //sscanf with %s reads one whitespace delimited token after Filename:
                 sscanf(line, "Filename: %255s", fname);
             } else if (strncmp(line, "Filesize:", 9) == 0) {
                 sscanf(line, "Filesize: %63s", fsize);
             } else if (strncmp(line, "MD5:", 4) == 0) {
                 sscanf(line, "MD5: %63s", fmd5);
             }
-            
+
         }
-        
+
         fclose(fp);
 
         count++;
@@ -264,7 +261,7 @@ void handle_list_req(int sock) {
     send_msg(sock, response);
     send_msg(sock, file_list);
     send_msg(sock, "<REP LIST END>\n");
- 
+
     printf("LIST response sent: %d tracker file(s) found\n", count);
 
 
@@ -278,12 +275,12 @@ void handle_get_req(int sock, char *msg) {
     char filepath[600];
     char file_content[MAXLINE * 20]; //tracker files are small
     char response[MAXLINE];
-    char md5_hex[33]; 
+    char md5_hex[33];
     FILE *fp;
     size_t bytes_read;
     //buffer to hold the raw 16-byte binary hash from OpenSSL
     unsigned char hash[MD5_DIGEST_LENGTH];
- 
+
     printf("handling GET request\n");
 
     //extract filename from the message
@@ -524,7 +521,7 @@ void handle_updatetracker_req(int sock, char *msg) {
 
     //write non dead peer entires
     for (int i = 0; i < peer_count; i++) {
-        fprintf(fp, "%s:%d:%lld:%lld:%ld\n", 
+        fprintf(fp, "%s:%d:%lld:%lld:%ld\n",
             peers[i].ip,
             peers[i].port,
             peers[i].start,
@@ -540,7 +537,7 @@ void handle_updatetracker_req(int sock, char *msg) {
 
     printf("updatetracker SUCC for '%s'\n", filename);
 
-    
+
 }
 
 //helper: write string to socket
@@ -588,20 +585,20 @@ int read_config(int *port) {
         printf(" WARNING: could not open 'sconfig'\n");
         return -1;
     }
- 
+
     char line[256];
- 
+
     //line 1 is port number
     if (fgets(line, sizeof(line), fp) == NULL) { fclose(fp); return -1; }
-    *port = atoi(line); // atoi converts "3490\n" → 3490 
- 
+    *port = atoi(line); // atoi converts "3490\n" → 3490
+
     //line 2 is tracker shared directory written into global TRACKER_DIR
     if (fgets(line, sizeof(line), fp) == NULL) { fclose(fp); return -1; }
     //remove trailing newline
     line[strcspn(line, "\n")] = '\0';
     strncpy(TRACKER_DIR, line, sizeof(TRACKER_DIR) - 1);
     TRACKER_DIR[sizeof(TRACKER_DIR) - 1] = '\0';
- 
+
     fclose(fp);
     printf("config loaded: port=%d, dir=%s\n", *port, TRACKER_DIR);
     return 0;
