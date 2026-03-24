@@ -130,7 +130,7 @@ void handle_update_tracker_com(){
 }
 
 void handle_get_com(){
-    // TODO: get command
+
 }
 
 void handle_command(char* str, int tracker_sock) {
@@ -187,6 +187,7 @@ int main(int argc,char *argv[]) {
 
     int tracker_sock = connect_tracker_server(tracker_address, tracker_port);
 
+    // fork peer so it can server any other peers that request stuff
     if(fork() == 0){
         start_server(server_port);
     }

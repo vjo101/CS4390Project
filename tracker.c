@@ -5,7 +5,7 @@
 #include <sys/dir.h>
 #include <string.h>
 #include <stdlib.h>
-// this is for constance INADDR_ANY?
+// this is for constant INADDR_ANY?
 #include <netinet/ip.h>
 #include <netinet/in.h>
 // for fork() and stuff
@@ -46,11 +46,11 @@ void peer_handler(int);
 
 
 int main() {
-    // TODO: get this from config file eventually
-    int server_port = 3490;
+    // default value of server port but read from sconfig file
+    int server_port = DEFAULT_PORT;
+    read_config(&server_port);
     pid_t pid;
     struct sockaddr_in server_addr, client_addr;
-    // WARN: is this needed? These seem to be variables that were undeclared in the skeleton file
     //socket for spefic clients
     int sock_child;
     //main listening socket
@@ -138,14 +138,13 @@ void peer_handler(int sock_child){
     //returns bytes read or -1 for error
 
     while((length = read(sock_child, read_msg, MAXLINE)) > 0){
-        //null termiante string to use strcmp/strstr safely
+        //null termiate string to use strcmp/strstr safely
         read_msg[length]='\0';
 
         printf("recieved message: %s\n", read_msg);
 
         if (strstr(read_msg, "REQ LIST") != NULL || strstr(read_msg, "req list") != NULL) {//list command received
             // TODO: req list
-            // handle_list_req(sock_child);// handle list request
             handle_list_req(sock_child);
             printf("list request handled.\n");
         }
@@ -364,7 +363,7 @@ void handle_createtracker_req(int sock, char *msg) {
     fp = fopen(filepath, "w");
     if (fp == NULL) {
         printf("Error: could not create tracker file '%s'\n", filepath);
-        send_msg(sock, "<createtracker fial>\n");
+        send_msg(sock, "<createtracker fail>\n");
         return;
     }
 
