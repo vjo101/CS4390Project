@@ -129,8 +129,14 @@ void handle_update_tracker_com(){
     // TODO: update tracerk
 }
 
-void handle_get_com(){
+void handle_get_com(int tracker_sock, char* get_filename) {
+    char* req = "req list";
 
+    if((write(tracker_sock, req, strlen(req))) < 0){// inform the server of the get request
+        printf("Send_request  failure\\n");
+        exit(1);
+    }
+    
 }
 
 void handle_command(char* str, int tracker_sock) {
@@ -143,7 +149,8 @@ void handle_command(char* str, int tracker_sock) {
     } else if(strcmp(command, "update_tracker") == 0){
         handle_update_tracker_com();
     } else if(strcmp(command, "get") == 0) {
-        handle_get_com();
+        char* get_filename = strtok(NULL, " ");
+        handle_get_com(tracker_sock, get_filename);
     } else {
         printf("Unkown command: %s", command);
     }
