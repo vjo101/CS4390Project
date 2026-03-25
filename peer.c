@@ -125,8 +125,116 @@ void handle_create_tracker_com(){
     // TODO: create tracker
 }
 
-void handle_update_tracker_com(){
-    // TODO: update tracerk
+void handle_update_tracker_com(int tracker_sock, char* str) {
+    //make copy of input string
+    char* token;
+    char* endptr;
+    char msg[256];
+    strncpy(msg, str, sizeof(msg) - 1);
+    msg[sizeof(msg) - 1] = '\0';
+
+    //check filename given
+    token = strtok(str, " ");
+    token = strtok(NULL, " ");
+    if (token == NULL) {
+        printf("No filename provided\n");
+        exit(1);
+    }
+
+    //check start bytes given and number
+    token = strtok(NULL, " ");
+    if (token == NULL) {
+        printf("No starting byte provided\n");
+        exit(1);
+    }
+
+    long start = strtol(token, &endptr, 10);
+    if (token == endptr || *endptr != '\0') {
+        printf("No valid starting byte provided\n");
+        exit(1);
+    }
+
+    //check end bytes given and number
+    token = strtok(NULL, " ");
+    if (token == NULL) {
+        printf("No ending byte provided\n");
+        exit(1);
+    }
+
+    long end = strtol(token, &endptr, 10);
+    if (token == endptr || *endptr != '\0') {
+        printf("No valid ending byte provided\n");
+        exit(1);
+    }
+
+    //check end more than start
+    if (end < start) {
+        printf("Ending byte smaller than start byte\n");
+            exit(1);
+    }
+
+    //check IP address given and valid
+    token = strtok(NULL, " ");
+    if (token == NULL) {
+        printf("No IP Address provided\n");
+        exit(1);
+    }
+
+    int w, x, y, z, len;
+    if (!(sscanf(token, "%d.%d.%d.%d%n", &w, &x, &y, &z, &len) == 4 &&
+        token[len] == '\0' &&
+        w >= 0 && w <= 255 &&
+        x >= 0 && x <= 255 &&
+        y >= 0 && y <= 255 &&
+        z >= 0 && z <= 255)) {
+        printf("IP Address is invalid\n");
+        exit(1);
+    }
+
+    //check port number given and number
+    token = strtok(NULL, " ");
+    if (token == NULL) {
+        printf("No port number provided\n");
+        exit(1);
+    }
+
+    long port_num = strtol(token, &endptr, 10);
+    if (token == endptr || *endptr != '\0') {
+        printf("No valid port provided\n");
+        exit(1);
+    }
+
+    if (port_num < 0 || port_num > 65535) {
+        printf("Invalid port number\n");
+        exit(1);
+    }
+
+    //send message to tracker
+    if ((write(tracker_sock, msg, strlen(msg))) < 0) {
+        printf("Send_request failure\n");
+        exit(1);
+    }
+
+    //receive message
+    char confirm[256];
+    ssize_t n;
+
+    if ((n = read(tracker_sock, confirm, sizeof(confirm) - 1)) <= 0) {
+        printf("Read failure\n");
+        exit(1);
+    }
+
+    confirm[n] = '\0';
+
+    if (strstr(confirm, "ferr")) {
+        printf("Tracker file does not exist\n");
+    } else if (strstr(confirm, "succ")) {
+        printf("Tracker file updated successfully\n");
+    } else {
+        printf("Could not update tracker file\n");
+    }
+
+    fflush(stdout);
 }
 
 void handle_get_com(){
@@ -141,7 +249,7 @@ void handle_command(char* str, int tracker_sock) {
     } else if(strcmp(command, "create_tracker") == 0){
         handle_create_tracker_com();
     } else if(strcmp(command, "update_tracker") == 0){
-        handle_update_tracker_com();
+        handle_update_tracker_com(tracker_sock, str);
     } else if(strcmp(command, "get") == 0) {
         handle_get_com();
     } else {
