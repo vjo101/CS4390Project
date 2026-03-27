@@ -6,8 +6,10 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
+// for md5 hash
+#include <openssl/md5.h>
 
-#define MAXLINE 100
+#define MAXLINE 1024
 #define BACKLOG_LENGTH 256
 
 void read_client_thread_config(int* tracker_port, char* tracker_address, int* n_seconds) {
@@ -105,15 +107,15 @@ void handle_list_com(int tracker_sock){
     char* req = "req list";
 
     if((write(tracker_sock, req, strlen(req))) < 0){// inform the server of the list request
-        printf("Send_request  failure\\n");
+        printf("Send_request failure\n");
         exit(1);
     }
 
-    char msg[256];
+    char msg[MAXLINE];
 
     ssize_t n;
     if((n = read(tracker_sock, msg, sizeof(msg))) < 0){// read what server has said
-        printf("Read  failure\\n");
+        printf("Read failure\n");
         exit(1);
     }
 
@@ -130,13 +132,95 @@ void handle_update_tracker_com(){
 }
 
 void handle_get_com(int tracker_sock, char* get_filename) {
-    char* req = "req list";
+    // WARN: did I do this right for snprintf? Or should i just use sprintf
+    char req[MAXLINE];
+    char tracker_filename[MAXLINE];
+    // check if they added .tracker or not and add .tracker if not added.
+    if (strstr(get_filename, ".tracker") == NULL) {
+        snprintf(tracker_filename, MAXLINE, "%s.tracker", get_filename);
+    }
+    printf("$s", tracker_filename);
+    snprintf(req, MAXLINE, "GET %s", tracker_filename);
 
     if((write(tracker_sock, req, strlen(req))) < 0){// inform the server of the get request
-        printf("Send_request  failure\\n");
+        printf("Send_request failure\n");
         exit(1);
     }
-    
+
+    char msg[MAXLINE];
+    ssize_t n;
+    int reading = 1;
+    char sent_hash[33];
+    char computed_hash[33];
+    // initiate md5 hashing
+    MD5_CTX mdContext;
+    MD5_Init(&mdContext);
+    // create file
+    FILE *fptr;
+    // want to do write mode to overwrite any old tracker file data
+    fptr = fopen(tracker_filename, "w");
+
+    while (reading) {
+        if((n = read(tracker_sock, msg, sizeof(msg))) < 0){// read what server has said
+            printf("Read failure\n");
+            exit(1);
+        }
+
+        // TODO: add error handling
+        // WARN: doesn't actually check if the first lin is "<REP GET BEGIN>"
+        // if the beginning of transmission discard the beginning
+        if(strstr(msg, "<REP GET BEGIN>\n") != NULL) {
+            // WARN: hardcoded value for header length
+            memmove(msg, msg + 16, n - 16);
+            // add null terminator at end since it just copied message, it didn't remove the left overs.
+            msg[n-16] = '\0';
+            // update the length value
+            n = n - 16;
+        }
+
+        // check if the closing value is present. If so, extract md5 hash and remover tail.
+        // WARN: what if the footer is split between two messages? can that happen?
+        if(strstr(msg, "<REP GET END") != NULL) {
+            // extract hash
+            char* start_of_hash = msg + n - 34;
+            memmove(sent_hash, start_of_hash, 32);
+            sent_hash[32] = '\0';
+            // remove tail
+            // need to remove last 47 bytes to get rid of footer. Is there a better way to do this?
+            memmove(msg, msg, n - 47);
+            msg[n-47] = '\0';
+            // update length after cutting it short
+            n = n-47;
+            print("clean file:\n%s", msg);
+            // stop reading from pipe since got everything
+            reading = 0;
+        }
+        // compute hash
+        MD5_Update(&mdContext, msg, n);
+        // immediately save to file
+        fprintf(fptr, msg);
+        
+        // check hash once done
+        if (!reading) {
+            unsigned char raw[MD5_DIGEST_LENGTH];
+            MD5_Final(raw, &mdContext);
+            for (int i = 0; i < MD5_DIGEST_LENGTH; i++) {
+                sprintf(computed_hash + (i * 2), "%02x", raw[i]);
+            }
+            computed_hash[32] = '\0';
+            printf("sent_hash: %s\ncomputed_hash: %s\n", sent_hash, computed_hash);
+            if (strcmp(computed_hash, sent_hash) != 0) {
+                printf("Tracker file is corrupted. Please request it again\n");
+                fclose(fptr);
+                // TODO: test this
+                remove(tracker_filename);
+            } else {
+                printf("Tracker file successfully downloaded.\n");
+                fclose(fptr);
+            }
+        }
+
+    }
 }
 
 void handle_command(char* str, int tracker_sock) {

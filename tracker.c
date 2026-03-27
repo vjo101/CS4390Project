@@ -309,17 +309,18 @@ void handle_get_req(int sock, char *msg) {
     bytes_read = fread(file_content, 1, sizeof(file_content) - 1, fp);
     fclose(fp);
     file_content[bytes_read]= '\0'; //null terminate
+    printf("file content:\n%s", file_content);
 
     //compute md5 of tracker file content
     //generate raw 16-byte digest
-    MD5((unsigned char*)file_content, bytes_read, hash);
+    compute_md5_of_string((unsigned char*)file_content, bytes_read, md5_hex);
 
     //convert binary hash to hex
-    for(int i = 0; i < MD5_DIGEST_LENGTH; i++) {
+    /*for(int i = 0; i < MD5_DIGEST_LENGTH; i++) {
         sprintf(md5_hex + (i * 2), "%02x", hash[i]);
     }
     md5_hex[32] = '\0'; //null terminate
-
+*/
     //send the response
     send_msg(sock, "<REP GET BEGIN>\n");
     send_msg(sock, file_content);
