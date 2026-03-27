@@ -24,7 +24,7 @@ peer.o: peer.c
 	$(CC) $(CFLAGS) -c $<
 
 $(TARGETS): peer.o $(PEER_DIRS)
-	$(CC) $(CFLAGS) $< -o $@
+	$(CC) $(CFLAGS) $< -o $@ $(LIBS)
 
 clean:
 	rm -rf $(PEER_DIRS)
