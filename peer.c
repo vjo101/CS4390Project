@@ -2,12 +2,12 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <sys/stat.h>
 #include <string.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
-// for md5 hash
-#include <openssl/md5.h>
+#include "util.h"
 
 #define MAXLINE 1024
 #define BACKLOG_LENGTH 256
@@ -104,12 +104,8 @@ void start_server(int port) {
 }
 
 void handle_list_com(int tracker_sock){
-    char* req = "req list";
 
-    if((write(tracker_sock, req, strlen(req))) < 0){// inform the server of the list request
-        printf("Send_request failure\n");
-        exit(1);
-    }
+    send_msg(tracker_sock, "req list");
 
     char msg[MAXLINE];
 
@@ -123,8 +119,49 @@ void handle_list_com(int tracker_sock){
     fflush(stdout);
 }
 
-void handle_create_tracker_com(){
-    // TODO: create tracker
+void handle_create_tracker_com(int tracker_sock, char* file_name, char* description){
+    FILE* source_file = fopen(file_name, "r");
+
+    if(source_file == NULL){
+        printf("Could not open file %s\n", file_name);
+    }
+
+    struct stat st;
+    stat(file_name, &st);
+
+    int file_size = st.st_size;
+
+    char* file_data = (char*) malloc (sizeof(char) * file_size + 1);
+    file_data[file_size] = '\0';
+
+    int pos = 0;
+    int n;
+
+    while((n = fread(file_data + pos, 1, 1024, source_file)) > 0){
+        pos += n;
+    }
+
+    char md5_buf[33];
+    compute_md5_of_string(file_data, file_size, md5_buf);
+
+    char msg_buffer[256];
+
+    sprintf(
+        msg_buffer,
+        "<createtracker %s %d %s %s>\n",
+        file_name,
+        file_size,
+        description,
+        md5_buf
+    );
+
+    send_msg(tracker_sock, msg_buffer);
+
+    memset(msg_buffer, 0, sizeof(msg_buffer));
+
+    n = read(tracker_sock, msg_buffer, sizeof(msg_buffer));
+    fwrite(msg_buffer, 1, n, stdout);
+    fflush(stdout);
 }
 
 void handle_update_tracker_com(int tracker_sock, char* str) {
@@ -299,7 +336,7 @@ void handle_get_com(int tracker_sock, char* get_filename) {
             msg[n-47] = '\0';
             // update length after cutting it short
             n = n-47;
-            print("clean file:\n%s", msg);
+            printf("clean file:\n%s", msg);
             // stop reading from pipe since got everything
             reading = 0;
         }
@@ -307,7 +344,7 @@ void handle_get_com(int tracker_sock, char* get_filename) {
         MD5_Update(&mdContext, msg, n);
         // immediately save to file
         fprintf(fptr, msg);
-        
+
         // check hash once done
         if (!reading) {
             unsigned char raw[MD5_DIGEST_LENGTH];
@@ -337,7 +374,10 @@ void handle_command(char* str, int tracker_sock) {
     if(strcmp(command, "list") == 0){
         handle_list_com(tracker_sock);
     } else if(strcmp(command, "create_tracker") == 0){
-        handle_create_tracker_com();
+        char* file_name = strtok(NULL, " ");
+        char* description = strtok(NULL, " ");
+
+        handle_create_tracker_com(tracker_sock, file_name, description);
     } else if(strcmp(command, "update_tracker") == 0){
         handle_update_tracker_com(tracker_sock, str);
     } else if(strcmp(command, "get") == 0) {

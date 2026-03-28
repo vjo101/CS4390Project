@@ -3,6 +3,7 @@
 #include <sys/socket.h>
 #include <errno.h>
 #include <sys/dir.h>
+#include <arpa/inet.h>
 #include <string.h>
 #include <stdlib.h>
 // this is for constant INADDR_ANY?
@@ -17,7 +18,8 @@
 //timestamps
 #include <time.h>
 #include <stdint.h>
-#include <openssl/md5.h>
+#include <openssl/evp.h>
+#include "util.h"
 
 // buffer length
 #define BACKLOG_LENGTH 256
@@ -33,16 +35,13 @@
 char TRACKER_DIR[256] = DEFAULT_TRACKER_DIR;
 
 //prototypes
-void peer_handler(int sock);
+void peer_handler(int sock_child, struct sockaddr_in client_addr);
 void handle_list_req(int sock);
 void handle_get_req(int sock, char *msg);
-void handle_createtracker_req(int sock, char *msg);
+void handle_createtracker_req(int sock, char* ip, int port, char *msg);
 void handle_updatetracker_req(int sock, char *msg);
-void compute_md5_of_string(const char *data, size_t len, char *out_hex);
 int  read_config(int *port);
-void send_msg(int sock, const char *msg);
 
-void peer_handler(int);
 
 
 int main() {
@@ -116,7 +115,7 @@ int main() {
         //New child process will serve the requester client. separate child will serve separate client
         if ((pid=fork())==0){
             close(sockid);   //child does not need listener
-            peer_handler(sock_child);//child is serving the client.
+            peer_handler(sock_child, client_addr);//child is serving the client.
             close (sock_child);
             // printf("\n 1. closed");
             exit(0);         // kill the process. child process all done with work
@@ -129,10 +128,14 @@ int main() {
 
 
  // function for file transfer. child process will call this function
-void peer_handler(int sock_child){
+void peer_handler(int sock_child, struct sockaddr_in client_addr){
     //start handiling client request
     int length;
     char read_msg[MAXLINE];
+
+    // client ip and port
+    char *client_ip = inet_ntoa(client_addr.sin_addr);
+    int client_port = ntohs(client_addr.sin_port);
 
     //read incoming message from peer
     //returns bytes read or -1 for error
@@ -159,7 +162,7 @@ void peer_handler(int sock_child){
             // TODO: createtracker function
             // tokenize_createmsg(read_msg);
             // handle_createtracker_req(sock_child);
-            handle_createtracker_req(sock_child, read_msg);
+            handle_createtracker_req(sock_child, client_ip, client_port, read_msg);
             printf("createtracker request handled.\n");
 
         }
@@ -315,12 +318,6 @@ void handle_get_req(int sock, char *msg) {
     //generate raw 16-byte digest
     compute_md5_of_string((unsigned char*)file_content, bytes_read, md5_hex);
 
-    //convert binary hash to hex
-    /*for(int i = 0; i < MD5_DIGEST_LENGTH; i++) {
-        sprintf(md5_hex + (i * 2), "%02x", hash[i]);
-    }
-    md5_hex[32] = '\0'; //null terminate
-*/
     //send the response
     send_msg(sock, "<REP GET BEGIN>\n");
     send_msg(sock, file_content);
@@ -334,18 +331,18 @@ void handle_get_req(int sock, char *msg) {
 }
 
 //creates a new tracker file
-void handle_createtracker_req(int sock, char *msg) {
-    char filename[256], description[256], md5[64], ip[64];
+void handle_createtracker_req(int sock, char* ip, int port, char *msg) {
+    char filename[256], description[256], md5[64];
     long long filesize;
-    int port;
     char filepath[600];
     FILE *fp;
+
 
     printf("handling CREATETRACKER request\n");
 
     //parse msg, skipping <createtracker
-        if (sscanf(msg, "%*s %255s %lld %255s %63s %63s %d",
-               filename, &filesize, description, md5, ip, &port) != 6) {
+    if (sscanf(msg, "%*s %255s %lld %255s %63s",
+               filename, &filesize, description, md5) != 4) {
         printf("ERROR: failed to parse createtracker message: %s\n", msg);
         send_msg(sock, "<createtracker fail>\n");
         return;
@@ -540,43 +537,6 @@ void handle_updatetracker_req(int sock, char *msg) {
 
 }
 
-//helper: write string to socket
-//handles partial writes for possible busy networks
-void send_msg(int sock, const char*msg) {
-    size_t len = strlen(msg);
-    size_t sent = 0;
-
-    //keep writing until all bytes sent
-    while (sent < len) {
-        ssize_t n = write(sock, msg + sent, len - sent);
-        if (n < 0){
-            printf("ERROR: write() to socket failed\n");
-            return;
-        }
-        sent += n;
-    }
-}
-
-//turns data into a hex md5 string
-//md5 fills 16 byte array with the hash
-//convert each byte to 2 hex chars
-void compute_md5_of_string(const char *data, size_t len, char *out_hex) {
-    unsigned char raw[MD5_DIGEST_LENGTH];
-    MD5_CTX ctx;
-
-    //setup internal state
-    MD5_Init(&ctx);
-    //update/ feed in data
-    MD5_Update(&ctx, data, len);
-    //finish and write
-    MD5_Final(raw, &ctx);
-
-    //convert to hex
-    for (int i = 0; i < MD5_DIGEST_LENGTH; i++) {
-        sprintf(out_hex + (i * 2), "%02x", raw[i]);
-    }
-    out_hex[32] = '\0';
-}
 
 //reads sconfig file
 int read_config(int *port) {
