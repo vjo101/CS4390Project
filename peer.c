@@ -278,15 +278,60 @@ void handle_update_tracker_com(int tracker_sock, char* str) {
     fflush(stdout);
 }
 
+void read_tracker_file(char* filename, TrackerHeader* header, PeerEntry* peers) {
+    FILE *fptr = fopen(filename, "r");
+
+    //store peer lines here
+    //each peer line: ip:port:start:end:timestamp
+    int peer_count = 0;
+
+    char line[256];
+    int in_header = 1; //flag to chekc if still reading header
+
+    while (fgets(line, sizeof(line), fptr) != NULL) {
+        //header lines start with captial letter keyword or '#'
+        if (in_header && (line[0] == '#' || line[0] == 'F' || line[0] == 'D' || line[0] == 'M')){
+            if (strncmp(line, "Filename:", 9) == 0) {
+                //sscanf with %s reads one whitespace delimited token after Filename:
+                sscanf(line, "Filename: %255s", header->filename);
+            } else if (strncmp(line, "Filesize:", 9) == 0) {
+                char* temp;
+                sscanf(line, "Filesize: %63s", temp);
+                header->filesize = atoll(temp);
+            } else if (strncmp(line, "MD5:", 4) == 0) {
+                sscanf(line, "MD5: %63s", header->md5);
+            }
+            continue;
+        }
+
+        //once line looks like peer, starting with digit or dot, then in peer section
+        in_header = 0;
+
+        //parse this line as peer entry
+        //ip:port:start:end:timestamp
+        PeerEntry pe;
+        memset(&pe, 0, sizeof(pe));
+        if (sscanf(line, "%63[^:]:%d:%lld:%lld:%ld", pe.ip, &pe.port, &pe.start, &pe.end, &pe.timestamp) == 5){
+            //add to peers array if theres room
+            //
+            if (peer_count < MAX_PEERS) {
+                peers[peer_count++] = pe;
+            }
+        }
+        //lines not parsed as peers are skipped
+
+    }
+    fclose(fptr);
+
+}
 void handle_get_com(int tracker_sock, char* get_filename) {
     // WARN: did I do this right for snprintf? Or should i just use sprintf
     char req[MAXLINE];
     char tracker_filename[MAXLINE];
     // check if they added .tracker or not and add .tracker if not added.
     if (strstr(get_filename, ".tracker") == NULL) {
-        snprintf(tracker_filename, MAXLINE, "%s.tracker", get_filename);
+        snprintf(tracker_filename, MAXLINE, "%s.track", get_filename);
     }
-    printf("$s", tracker_filename);
     snprintf(req, MAXLINE, "GET %s", tracker_filename);
 
     if((write(tracker_sock, req, strlen(req))) < 0){// inform the server of the get request
@@ -338,14 +383,13 @@ void handle_get_com(int tracker_sock, char* get_filename) {
             msg[n-47] = '\0';
             // update length after cutting it short
             n = n-47;
-            printf("clean file:\n%s", msg);
             // stop reading from pipe since got everything
             reading = 0;
         }
         // compute hash
         MD5_Update(&mdContext, msg, n);
         // immediately save to file
-        fprintf(fptr, msg);
+        fprintf (fptr, msg);
 
         // check hash once done
         if (!reading) {
@@ -355,7 +399,6 @@ void handle_get_com(int tracker_sock, char* get_filename) {
                 sprintf(computed_hash + (i * 2), "%02x", raw[i]);
             }
             computed_hash[32] = '\0';
-            printf("sent_hash: %s\ncomputed_hash: %s\n", sent_hash, computed_hash);
             if (strcmp(computed_hash, sent_hash) != 0) {
                 printf("Tracker file is corrupted. Please request it again\n");
                 fclose(fptr);
@@ -370,48 +413,23 @@ void handle_get_com(int tracker_sock, char* get_filename) {
     }
 
     PeerEntry peers[MAX_PEERS];
-    char header[MAXLINE * 4];
-    memset(header, 0 sizeof(header));
+    TrackerHeader *header;
+
+    read_tracker_file(tracker_filename, header, peers);
+
+    printf("ip: %s\n", peers[0].ip);
+    printf("Filename = %s\n", header->filename);
+    printf("Md5 = %s\n", header->md5);
+    printf("Filesize = %lld\n", header->filesize);
 
     // TODO: start requesting data from other peers
+    // create MAX_THREADS threads and give them assignment.
+    // wait for them to join back and place the received data in file and update tracker and give new assignment
+    // if error, give them a new peer to download from
+    // at end, check the md5 hash and restart if it messed up. then delete tracker file
     }
 
-void read_tracker_file(char* filename, int namelen, char* header, PeerEntry* peers) {
-    fptr = fopen(filename, "r");
 
-    //store peer lines here
-    //each peer line: ip:port:start:end:timestamp
-    int peer_count = 0;
-
-    char line[256];
-    int in_header = 1; //flag to chekc if still reading header
-
-    while (fgets(line, sizeof(line), fp) != NULL) {
-        //header lines start with captial letter keyword or '#'
-        if (in_header && (line[0] == '#' || line[0] == 'F' || line[0] == 'D' || line[0] == 'M')){
-        strncat(header, line, sizeof(header) - strlen(header) - 1);
-        continue;
-        }
-
-        //once line looks like peer, starting with digit or dot, then in peer section
-        in_header = 0;
-
-        //parse this line as peer entry
-        //ip:port:start:end:timestamp
-        PeerEntry pe;
-        memset(&pe, 0, sizeof(pe));
-        if (sscanf(line, "%63[^:]:%d:%lld:%lld:%ld", pe.ip, &pe.port, &pe.start, &pe.end, &pe.timestamp) == 5){
-            //add to peers array if theres room
-            if (peer_count < MAX_PEERS) {
-                peers[peer_count++] = pe;
-            }
-        }
-        //lines not parsed as peers are skipped
-
-    }
-    fclose(fp);
-
-}
 
 void handle_command(char* str, int tracker_sock) {
     char* command = strtok(str, " ");
@@ -429,7 +447,7 @@ void handle_command(char* str, int tracker_sock) {
         char* get_filename = strtok(NULL, " ");
         handle_get_com(tracker_sock, get_filename);
     } else {
-        printf("Unkown command: %s", command);
+        printf("Unkown command: %s\n", command);
     }
 }
 

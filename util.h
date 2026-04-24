@@ -19,4 +19,11 @@ typedef struct {
     long timestamp;
 } PeerEntry;
 
+typedef struct {
+    char filename[256];
+    char description[256];
+    char md5[64];
+    long long filesize;
+} TrackerHeader;
+
 #endif // UTIL_H
