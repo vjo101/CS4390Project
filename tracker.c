@@ -45,9 +45,8 @@ int  read_config(int *port);
 
 
 int main() {
-    // default value of server port but read from sconfig file
+    // default value of server port
     int server_port = DEFAULT_PORT;
-    read_config(&server_port);
     pid_t pid;
     struct sockaddr_in server_addr, client_addr;
     //socket for spefic clients
@@ -147,29 +146,19 @@ void peer_handler(int sock_child, struct sockaddr_in client_addr){
         printf("recieved message: %s\n", read_msg);
 
         if (strstr(read_msg, "REQ LIST") != NULL || strstr(read_msg, "req list") != NULL) {//list command received
-            // TODO: req list
             handle_list_req(sock_child);
             printf("list request handled.\n");
         }
         else if((strstr(read_msg,"get")!=NULL)||(strstr(read_msg,"GET")!=NULL)){// get command received
-            // TODO: get function
-            // xtrct_fname(read_msg, " ");// extract filename from the command
-            // handle_get_req(sock_child, fname);
             handle_get_req(sock_child, read_msg);
             printf("get request handled.\n");
         }
         else if((strstr(read_msg,"createtracker")!=NULL)||(strstr(read_msg,"Createtracker")!=NULL)||(strstr(read_msg,"CREATETRACKER")!=NULL)){// get command received
-            // TODO: createtracker function
-            // tokenize_createmsg(read_msg);
-            // handle_createtracker_req(sock_child);
             handle_createtracker_req(sock_child, client_ip, client_port, read_msg);
             printf("createtracker request handled.\n");
 
         }
         else if((strstr(read_msg,"updatetracker")!=NULL)||(strstr(read_msg,"Updatetracker")!=NULL)||(strstr(read_msg,"UPDATETRACKER")!=NULL)){// get command received
-            // TODO: update tracker function
-            // tokenize_updatemsg(read_msg);
-            // handle_updatetracker_req(sock_child);
             handle_updatetracker_req(sock_child, read_msg);
             printf("updatetracker request handled.\n");
         }
@@ -427,13 +416,6 @@ void handle_updatetracker_req(int sock, char *msg) {
     //store peer lines here
     //each peer line: ip:port:start:end:timestamp
     #define MAX_PEERS 64
-    typedef struct {
-        char ip[64];
-        int port;
-        long long start;
-        long long end;
-        long timestamp;
-    } PeerEntry;
 
     PeerEntry peers[MAX_PEERS];
     int peer_count = 0;

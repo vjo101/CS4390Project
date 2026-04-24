@@ -11,6 +11,7 @@
 
 #define MAXLINE 1024
 #define BACKLOG_LENGTH 256
+#define MAX_PEERS 64
 
 void read_client_thread_config(int* tracker_port, char* tracker_address, int* n_seconds) {
     // read client thread config
@@ -42,8 +43,9 @@ void read_server_thread_config(int* server_port){
     fclose(server_thread_config);
 }
 
-void peer_handler(int sock) {
+void peer_handler(int sock, struct sockaddr_in peer_addr) {
     // TODO: Fill this in
+    printf("Handling peer %d", sock);
 }
 
 void start_server(int port) {
@@ -92,7 +94,7 @@ void start_server(int port) {
         if (fork()==0){
             //child does not need listener
             close(sockid);
-            peer_handler(sock_child);
+            peer_handler(sock_child, peer_addr);
             close (sock_child);
             // kill the process. child process all done with work
             exit(0);
@@ -366,6 +368,49 @@ void handle_get_com(int tracker_sock, char* get_filename) {
         }
 
     }
+
+    PeerEntry peers[MAX_PEERS];
+    char header[MAXLINE * 4];
+    memset(header, 0 sizeof(header));
+
+    // TODO: start requesting data from other peers
+    }
+
+void read_tracker_file(char* filename, int namelen, char* header, PeerEntry* peers) {
+    fptr = fopen(filename, "r");
+
+    //store peer lines here
+    //each peer line: ip:port:start:end:timestamp
+    int peer_count = 0;
+
+    char line[256];
+    int in_header = 1; //flag to chekc if still reading header
+
+    while (fgets(line, sizeof(line), fp) != NULL) {
+        //header lines start with captial letter keyword or '#'
+        if (in_header && (line[0] == '#' || line[0] == 'F' || line[0] == 'D' || line[0] == 'M')){
+        strncat(header, line, sizeof(header) - strlen(header) - 1);
+        continue;
+        }
+
+        //once line looks like peer, starting with digit or dot, then in peer section
+        in_header = 0;
+
+        //parse this line as peer entry
+        //ip:port:start:end:timestamp
+        PeerEntry pe;
+        memset(&pe, 0, sizeof(pe));
+        if (sscanf(line, "%63[^:]:%d:%lld:%lld:%ld", pe.ip, &pe.port, &pe.start, &pe.end, &pe.timestamp) == 5){
+            //add to peers array if theres room
+            if (peer_count < MAX_PEERS) {
+                peers[peer_count++] = pe;
+            }
+        }
+        //lines not parsed as peers are skipped
+
+    }
+    fclose(fp);
+
 }
 
 void handle_command(char* str, int tracker_sock) {
