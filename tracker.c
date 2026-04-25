@@ -128,7 +128,7 @@ int main() {
 
  // function for file transfer. child process will call this function
 void peer_handler(int sock_child, struct sockaddr_in client_addr){
-    //start handiling client request
+    //start handling client request
     int length;
     char read_msg[MAXLINE];
 
@@ -140,7 +140,7 @@ void peer_handler(int sock_child, struct sockaddr_in client_addr){
     //returns bytes read or -1 for error
 
     while((length = read(sock_child, read_msg, MAXLINE)) > 0){
-        //null termiate string to use strcmp/strstr safely
+        //null terminate string to use strcmp/strstr safely
         read_msg[length]='\0';
 
         printf("recieved message: %s\n", read_msg);

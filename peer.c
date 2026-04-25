@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
+#include <sys/file.h>
 #include "util.h"
 // for threads
 #include <pthread.h>
@@ -19,6 +20,14 @@
 #define MAX_THREADS 10
 
 
+// shared folder path read from serverThreadConfig.cfg, used by peer_handler threads to serve file chunks
+char shared_folder[256];
+
+// args passed to each peer_handler thread (one per incoming peer connection)
+typedef struct {
+    int sock;
+    struct sockaddr_in peer_addr;
+} HandlerArgs;
 
 void read_client_thread_config(int* tracker_port, char* tracker_address, int* n_seconds) {
     // read client thread config
@@ -46,13 +55,71 @@ void read_server_thread_config(int* server_port){
         exit(1);
     }
 
-    fscanf(server_thread_config, "%d", server_port);
+    // line 1: listen port, line 2: shared folder name
+    fscanf(server_thread_config, "%d %s", server_port, shared_folder);
     fclose(server_thread_config);
 }
 
-void peer_handler(int sock, struct sockaddr_in peer_addr) {
-    // TODO: Fill this in
-    printf("Handling peer %d", sock);
+// handles one incoming peer connection: serves a single file chunk then closes
+// called as a detached pthread, unpacks HandlerArgs, frees it, then does the work
+void* peer_handler(void* arg) {
+    HandlerArgs* args = (HandlerArgs*) arg;
+    int sock = args->sock;
+    struct sockaddr_in peer_addr = args->peer_addr;
+    free(args);
+
+    // read incoming GET request: <GET filename start_byte end_byte>\n
+    int length;
+    char read_msg[MAXLINE];
+    length = read(sock, read_msg, MAXLINE);
+    if (length <= 0) {
+        close(sock);
+        return NULL;
+    }
+    read_msg[length] = '\0';
+    printf("received message: %s\n", read_msg);
+
+    char filename[256];
+    long long start_byte, end_byte;
+    // %*s skips "<GET", %lld stops at '>' so end_byte parses correctly
+    if (sscanf(read_msg, "%*s %255s %lld %lld", filename, &start_byte, &end_byte) != 3) {
+        send_msg(sock, "<GET invalid>\n");
+        close(sock);
+        return NULL;
+    }
+
+    // chunk size must be <= 1024 and range must be valid
+    long long chunk_size = end_byte - start_byte + 1;
+    if (chunk_size > 1024 || chunk_size <= 0 || start_byte < 0) {
+        send_msg(sock, "<GET invalid>\n");
+        close(sock);
+        return NULL;
+    }
+
+    // open the requested file from this peer's shared folder
+    char filepath[600];
+    snprintf(filepath, sizeof(filepath), "%s/%s", shared_folder, filename);
+    printf("peer requested file: %s\n", filepath);
+
+    // return error if filepath doesn't exist or can't be opened
+    FILE *fp = fopen(filepath, "rb");
+    if (fp == NULL) {
+        printf("Error: file not found %s\n", filepath);
+        send_msg(sock, "<GET invalid>\n");
+        close(sock);
+        return NULL;
+    }
+
+    // TODO: flock LOCK_SH, fseek to start_byte, fread chunk, flock LOCK_UN, fclose
+    // flock guards against download threads (parent process) writing the same file
+    // if bytes_read == 0, send "<GET invalid>\n" and close
+
+    // TODO: write raw bytes to sock, no wrapper, size already bounded to <= 1024
+    // print: "Serving <start>-<end> of <filename> to <peer_ip>\n"
+
+    printf("Handling peer %d\n", sock);
+    close(sock);
+    return NULL;
 }
 
 void start_server(int port) {
@@ -97,18 +164,20 @@ void start_server(int port) {
             continue;
         }
 
-        //New child process will serve the requester client. separate child will serve separate client
-        if (fork()==0){
-            //child does not need listener
-            close(sockid);
-            peer_handler(sock_child, peer_addr);
-            close (sock_child);
-            // kill the process. child process all done with work
-            exit(0);
-        }
+        // spawn a thread to handle this connection; thread owns sock_child and closes it
+        HandlerArgs* args = malloc(sizeof(HandlerArgs));
+        args->sock = sock_child;
+        args->peer_addr = peer_addr;
 
-        // parent all done with client, only child will communicate with that client from now
-        close(sock_child);
+        pthread_t tid;
+        if (pthread_create(&tid, NULL, peer_handler, args) != 0) {
+            printf("Failed to create handler thread\n");
+            close(sock_child);
+            free(args);
+            continue;
+        }
+        // detach so thread cleans up automatically when done
+        pthread_detach(tid);
     }
 }
 
@@ -374,6 +443,9 @@ void handle_get_com(int tracker_sock, char* get_filename) {
     printf("Filesize = %lld\n", header->filesize);
 
     // TODO: start requesting data from other peers
+    // download threads must send: <GET filename start_byte end_byte>\n
+    // where end_byte - start_byte + 1 <= 1024
+    // response is raw bytes on success, or "<GET invalid>\n" on error
     // create MAX_THREADS threads and give them assignment.
     // wait for them to join back and place the received data in file and update tracker and give new assignment
     // if error, give them a new peer to download from
