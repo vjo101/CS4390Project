@@ -13,6 +13,8 @@
 // for threads
 #include <pthread.h>
 #include <stdbool.h>
+// for getting ip address
+#include <ifaddrs.h>
 
 #define MAXLINE 1024
 #define BACKLOG_LENGTH 256
@@ -22,7 +24,9 @@
 
 // shared folder path read from serverThreadConfig.cfg, used by peer_handler threads to serve file chunks
 char shared_folder[256];
-
+// should be long enough for address
+//
+char self_ip_addr[16];
 // args passed to each peer_handler thread (one per incoming peer connection)
 typedef struct {
     int sock;
@@ -58,6 +62,28 @@ void read_server_thread_config(int* server_port){
     // line 1: listen port, line 2: shared folder name
     fscanf(server_thread_config, "%d %s", server_port, shared_folder);
     fclose(server_thread_config);
+}
+
+// gets the ip of the peer
+void get_self_ip(char* addr) {
+    struct ifaddrs *ifap, *ifa;
+    struct sockaddr_in *sa;
+    char* temp;
+
+    getifaddrs(&ifap);
+    for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
+        if (ifa->ifa_addr && ifa->ifa_addr->sa_family==AF_INET) {
+            sa = (struct sockaddr_in *) ifa->ifa_addr;
+            temp = inet_ntoa(sa->sin_addr);
+            // check for local ip
+            if (strstr(temp, "192")) {
+                strcpy(addr, temp);
+                break;
+            }
+        }
+    }
+
+    freeifaddrs(ifap);
 }
 
 // handles one incoming peer connection: serves a single file chunk then closes
@@ -473,6 +499,10 @@ void handle_command(char* str, int tracker_sock) {
             printf("No IP Address provided.");
             return;
         }
+        // easy way to get self ip addr when manually inputting
+        if (strcmp(ip_addr, "0") == 0) {
+            ip_addr = self_ip_addr;
+        }
         int w, x, y, z, ip_len;
         if (!(sscanf(ip_addr, "%d.%d.%d.%d%n", &w, &x, &y, &z, &ip_len) == 4 &&
             ip_addr[ip_len] == '\0' &&
@@ -482,13 +512,17 @@ void handle_command(char* str, int tracker_sock) {
             z >= 0 && z <= 255)) {
             printf("IP Address is invalid.");
             return;
-        }
+        } 
         char* temp = strtok(NULL, " ");
         if (temp == NULL) {
             printf("No port number provided.");
             return;
         }
         int port_num = atoi(temp);
+        // eady way to get port number
+        if (port_num == 0) {
+            read_server_thread_config(&port_num);
+        }
         if (port_num < 0 || port_num > 65535) {
             printf("Port number is invalid.");
             return;
@@ -527,6 +561,10 @@ void handle_command(char* str, int tracker_sock) {
             printf("No IP Address provided.");
             return;
         }
+        // easy way to get self ip addr when manually inputting
+        if (strcmp(ip_addr, "0") == 0) {
+            ip_addr = self_ip_addr;
+        }
         int w, x, y, z, ip_len;
         if (!(sscanf(ip_addr, "%d.%d.%d.%d%n", &w, &x, &y, &z, &ip_len) == 4 &&
             ip_addr[ip_len] == '\0' &&
@@ -543,6 +581,10 @@ void handle_command(char* str, int tracker_sock) {
             return;
         }
         int port_num = atoi(temp);
+        // eady way to get port number
+        if (port_num == 0) {
+            read_server_thread_config(&port_num);
+        }
         if (port_num < 0 || port_num > 65535) {
             printf("Port number is invalid.");
             return;
@@ -592,7 +634,10 @@ int main(int argc,char *argv[]) {
 
     read_client_thread_config(&tracker_port, tracker_address, &n_seconds);
     read_server_thread_config(&server_port);
+    // get the ip
+    get_self_ip(self_ip_addr);
 
+    printf("Peer server IP = %s\n", self_ip_addr);
     int tracker_sock = connect_tracker_server(tracker_address, tracker_port);
 
     // fork peer so it can server any other peers that request stuff
