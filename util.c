@@ -37,3 +37,15 @@ void send_msg(int sock, const char*msg) {
         sent += n;
     }
 }
+
+int pe_compare(const void *s1, const void *s2) {
+    PeerEntry *pe1 = (PeerEntry *) s1;
+    PeerEntry *pe2 = (PeerEntry *) s2;
+    if (pe1->timestamp > pe2->timestamp) {
+        return 1;
+    } else if (pe1->timestamp == pe2->timestamp) {
+        return 0;
+    } else {
+        return -1;
+    }
+}

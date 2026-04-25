@@ -39,7 +39,7 @@ void peer_handler(int sock_child, struct sockaddr_in client_addr);
 void handle_list_req(int sock);
 void handle_get_req(int sock, char *msg);
 void handle_createtracker_req(int sock, char* ip, int port, char *msg);
-void handle_updatetracker_req(int sock, char *msg);
+void handle_updatetracker_req(int sock, char* ip, int port, char *msg);
 int  read_config(int *port);
 
 
@@ -159,7 +159,7 @@ void peer_handler(int sock_child, struct sockaddr_in client_addr){
 
         }
         else if((strstr(read_msg,"updatetracker")!=NULL)||(strstr(read_msg,"Updatetracker")!=NULL)||(strstr(read_msg,"UPDATETRACKER")!=NULL)){// get command received
-            handle_updatetracker_req(sock_child, read_msg);
+            handle_updatetracker_req(sock_child, client_ip, client_port, read_msg);
             printf("updatetracker request handled.\n");
         }
         else{
@@ -362,7 +362,8 @@ void handle_createtracker_req(int sock, char* ip, int port, char *msg) {
     fprintf(fp, "#list of peers follows next\n");
 
     //write first peer entry
-    fprintf(fp, "%s:%d:0:%lld:%ld\n", ip, port, filesize, time(NULL));
+    //WARN: Changed to filesize-1 since bytes are 0 indexed
+    fprintf(fp, "%s:%d:0:%lld:%ld\n", ip, port, filesize-1, time(NULL));
     fclose(fp);
 
     printf("createtracker SUCC: created '%s' (peer: %s:%d)\n", filepath, ip, port);
@@ -372,18 +373,17 @@ void handle_createtracker_req(int sock, char* ip, int port, char *msg) {
 }
 
 //update a peers entry in a tracker file
-void handle_updatetracker_req(int sock, char *msg) {
-    char filename[256], ip[64];
+void handle_updatetracker_req(int sock, char* ip, int port, char *msg) {
+    char filename[256];
     long long start_bytes, end_bytes;
-    int port;
     char filepath[600];
     char response[512];
 
     printf("Handling UPDATETRACKER request\n");
 
     //parse the message
-    if (sscanf(msg, "%*s %255s %lld %lld %63s %d",
-               filename, &start_bytes, &end_bytes, ip, &port) != 5) {
+    if (sscanf(msg, "%*s %255s %lld %lld",
+               filename, &start_bytes, &end_bytes) != 3) {
         printf("ERROR: failed to parse updatetracker message: %s\n", msg);
         snprintf(response, sizeof(response), "<updatetracker %s fail>\n", filename);
         send_msg(sock, response);

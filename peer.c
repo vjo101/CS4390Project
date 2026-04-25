@@ -9,10 +9,13 @@
 #include <stdlib.h>
 #include <arpa/inet.h>
 #include "util.h"
+// for threads
+#include <pthread.h>
 
 #define MAXLINE 1024
 #define BACKLOG_LENGTH 256
 #define MAX_PEERS 64
+#define MAX_THREADS 10
 
 void read_client_thread_config(int* tracker_port, char* tracker_address, int* n_seconds) {
     // read client thread config
@@ -167,95 +170,30 @@ void handle_create_tracker_com(int tracker_sock, char* file_name, char* descript
     fflush(stdout);
 }
 
-void handle_update_tracker_com(int tracker_sock, char* str) {
+void handle_update_tracker_com(int tracker_sock, char* file_name, int start_bytes, long end_bytes) {
     //make copy of input string
     char* token;
     char* endptr;
     char msg[256];
-    strncpy(msg, str, sizeof(msg) - 1);
-    msg[sizeof(msg) - 1] = '\0';
-
-    //check filename given
-    token = strtok(str, " ");
-    token = strtok(NULL, " ");
-    if (token == NULL) {
-        printf("No filename provided\n");
-        exit(1);
-    }
-
-    //check start bytes given and number
-    token = strtok(NULL, " ");
-    if (token == NULL) {
-        printf("No starting byte provided\n");
-        exit(1);
-    }
-
-    long start = strtol(token, &endptr, 10);
-    if (token == endptr || *endptr != '\0') {
-        printf("No valid starting byte provided\n");
-        exit(1);
-    }
-
-    //check end bytes given and number
-    token = strtok(NULL, " ");
-    if (token == NULL) {
-        printf("No ending byte provided\n");
-        exit(1);
-    }
-
-    long end = strtol(token, &endptr, 10);
-    if (token == endptr || *endptr != '\0') {
-        printf("No valid ending byte provided\n");
-        exit(1);
-    }
+    //strncpy(msg, str, sizeof(msg) - 1);
+    //msg[sizeof(msg) - 1] = '\0';
 
     //check end more than start
-    if (end < start) {
+    if (end_bytes < start_bytes) {
         printf("Ending byte smaller than start byte\n");
             exit(1);
     }
 
-    //check IP address given and valid
-    token = strtok(NULL, " ");
-    if (token == NULL) {
-        printf("No IP Address provided\n");
-        exit(1);
-    }
-
-    int w, x, y, z, len;
-    if (!(sscanf(token, "%d.%d.%d.%d%n", &w, &x, &y, &z, &len) == 4 &&
-        token[len] == '\0' &&
-        w >= 0 && w <= 255 &&
-        x >= 0 && x <= 255 &&
-        y >= 0 && y <= 255 &&
-        z >= 0 && z <= 255)) {
-        printf("IP Address is invalid\n");
-        exit(1);
-    }
-
-    //check port number given and number
-    token = strtok(NULL, " ");
-    if (token == NULL) {
-        printf("No port number provided\n");
-        exit(1);
-    }
-
-    long port_num = strtol(token, &endptr, 10);
-    if (token == endptr || *endptr != '\0') {
-        printf("No valid port provided\n");
-        exit(1);
-    }
-
-    if (port_num < 0 || port_num > 65535) {
-        printf("Invalid port number\n");
-        exit(1);
-    }
+    sprintf(
+        msg,
+        "<updatetracker %s %d %ld>\n",
+        file_name,
+        start_bytes,
+        end_bytes
+    );
 
     //send message to tracker
-    if ((write(tracker_sock, msg, strlen(msg))) < 0) {
-        printf("Send_request failure\n");
-        exit(1);
-    }
+    send_msg(tracker_sock, msg);
 
     //receive message
     char confirm[256];
@@ -279,7 +217,8 @@ void handle_update_tracker_com(int tracker_sock, char* str) {
     fflush(stdout);
 }
 
-void read_tracker_file(char* filename, TrackerHeader* header, PeerEntry* peers) {
+// returns number of peers read
+int read_tracker_file(char* filename, TrackerHeader* header, PeerEntry* peers) {
     printf("reading");
     FILE *fptr = fopen(filename, "r");
 
@@ -324,7 +263,7 @@ void read_tracker_file(char* filename, TrackerHeader* header, PeerEntry* peers) 
 
     }
     fclose(fptr);
-
+    return peer_count;
 }
 void handle_get_com(int tracker_sock, char* get_filename) {
     // WARN: did I do this right for snprintf? Or should i just use sprintf
@@ -336,10 +275,7 @@ void handle_get_com(int tracker_sock, char* get_filename) {
     }
     snprintf(req, MAXLINE, "GET %s", tracker_filename);
 
-    if((write(tracker_sock, req, strlen(req))) < 0){// inform the server of the get request
-        printf("Send_request failure\n");
-        exit(1);
-    }
+    send_msg(tracker_sock, req);
 
     char msg[MAXLINE];
     ssize_t n;
@@ -418,8 +354,12 @@ void handle_get_com(int tracker_sock, char* get_filename) {
 
     TrackerHeader *header = malloc(sizeof(TrackerHeader));
 
-    printf("about to read");
-    read_tracker_file(tracker_filename, header, peers);
+    int peer_count = read_tracker_file(tracker_filename, header, peers);
+    qsort(peers, peer_count, sizeof(PeerEntry), pe_compare);
+
+    for (int i = 0; i < peer_count; i++) {
+        printf("addr: %s:%d\ntimestamp: %ld\n", peers[i].ip, peers[i].port, peers[i].timestamp);
+    }
 
     printf("ip: %s\n", peers[0].ip);
     printf("Filename = %s\n", header->filename);
@@ -446,7 +386,24 @@ void handle_command(char* str, int tracker_sock) {
 
         handle_create_tracker_com(tracker_sock, file_name, description);
     } else if(strcmp(command, "update_tracker") == 0){
-        handle_update_tracker_com(tracker_sock, str);
+        char* file_name = strtok(NULL, " ");
+        if (file_name == NULL) {
+            printf("No filename provided");
+            return;
+        }
+        char* temp = strtok(NULL, " ");
+        if (temp == NULL) {
+            printf("No start byte provided.");
+            return;
+        }
+        int start_bytes = atoi(temp);
+        temp = strtok(NULL, " ");
+        if (temp == NULL) {
+            printf("No end byte provided.");
+            return;
+        }
+        long end_bytes = atol(temp);
+        handle_update_tracker_com(tracker_sock, file_name, start_bytes, end_bytes);
     } else if(strcmp(command, "get") == 0) {
         char* get_filename = strtok(NULL, " ");
         handle_get_com(tracker_sock, get_filename);
