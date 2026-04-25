@@ -311,6 +311,8 @@ void* handle_repeat_update_tracker(void* args) {
         sleep(n_seconds);
         handle_update_tracker_com(update_args->tracker_sock, update_args->file_name, update_args->start_bytes, update_args->end_bytes, update_args->ip_addr, update_args->port_num);
     }
+
+    return NULL;
 }
 
 // returns number of peers read
@@ -520,13 +522,13 @@ void handle_command(char* str, int tracker_sock) {
         RepeatUpdateArgs update_args;
         update_args.tracker_sock = tracker_sock;
         update_args.file_name = file_name;
-        //Figure out getting current byte count
+        update_args.start_bytes = start_bytes;
+        update_args.end_bytes = end_bytes;
         update_args.ip_addr = ip_addr;
         update_args.port_num = port_num;
 
         pthread_create(&timed_update, NULL, handle_repeat_update_tracker, &update_args);
         pthread_join(timed_update, NULL);
-        //RepeatUpdateArgs* update_args = (RepeatUpdateArgs*)update_args;
         
     } else if(strcmp(command, "update_tracker") == 0) {
         char* endptr;
