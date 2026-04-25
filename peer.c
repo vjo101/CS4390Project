@@ -15,6 +15,8 @@
 #include <stdbool.h>
 // for getting ip address
 #include <ifaddrs.h>
+// for ceil
+#include <math.h>
 
 #define MAXLINE 1024
 #define BACKLOG_LENGTH 256
@@ -442,7 +444,6 @@ void handle_get_com(int tracker_sock, char* get_filename) {
             if (strcmp(computed_hash, sent_hash) != 0) {
                 printf("Tracker file is corrupted. Please request it again\n");
                 fclose(fptr);
-                // TODO: test this
                 remove(tracker_filename);
             } else {
                 printf("Tracker file successfully downloaded.\n");
@@ -457,6 +458,7 @@ void handle_get_com(int tracker_sock, char* get_filename) {
     TrackerHeader *header = malloc(sizeof(TrackerHeader));
 
     int peer_count = read_tracker_file(tracker_filename, header, peers);
+    // TODO: test if this actually sorts
     qsort(peers, peer_count, sizeof(PeerEntry), pe_compare);
 
     for (int i = 0; i < peer_count; i++) {
@@ -469,14 +471,49 @@ void handle_get_com(int tracker_sock, char* get_filename) {
     printf("Filesize = %lld\n", header->filesize);
 
     // TODO: start requesting data from other peers
+    // create array for MAX_THREADS with pthread_t
+    pthread_t thread[MAX_THREADS];
+    PeerEntry assignments[MAX_THREADS];
+    int total_segments = ceil((double) header->filesize / MAXLINE);
+    int last_seg_bytes = header->filesize % MAXLINE;
+    int req_seg = 0;
+    int down_seg = 0;
+
+    bool finished = false;
+    // open file
+    while (!finished) {
+        // send out 10 threads with their assignments
+        for (int i = 0; i < MAX_THREADS; i++) {
+            if (req_seg == total_segments) {
+                break;
+            }
+            // find ideal peer to download this offset
+            // send out threads with offset, ip address, port, amount to download
+        }
+        // wait for threads to come back
+        for (int i = 0; i < MAX_THREADS; i++) {
+            if (down_seg == total_segments) {
+                break;
+            }
+            // get the ptr back. If null, reassign.
+            // if not null, save data to file
+            // update tracker
+        } 
+    }
+    // check md5. If incorrect, delete file and just recall this function
+}
+// TODO: function to send download request to 
     // download threads must send: <GET filename start_byte end_byte>\n
     // where end_byte - start_byte + 1 <= 1024
     // response is raw bytes on success, or "<GET invalid>\n" on error
-    // create MAX_THREADS threads and give them assignment.
-    // wait for them to join back and place the received data in file and update tracker and give new assignment
-    // if error, give them a new peer to download from
-    // at end, check the md5 hash and restart if it messed up. then delete tracker file
-}
+void* download_bytes(void* arg) {
+    // get bytes needed to download
+    // get offset
+    // get ip address
+    // get port
+    // request stuff from peer
+    // return pointer to downloaded stuff or NULL if failed
+};
 
 void handle_command(char* str, int tracker_sock) {
     char* command = strtok(str, " ");
