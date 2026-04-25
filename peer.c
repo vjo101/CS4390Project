@@ -11,6 +11,7 @@
 #include "util.h"
 // for threads
 #include <pthread.h>
+#include <stdbool.h>
 
 #define MAXLINE 1024
 #define BACKLOG_LENGTH 256
@@ -125,7 +126,7 @@ void handle_list_com(int tracker_sock){
     fflush(stdout);
 }
 
-void handle_create_tracker_com(int tracker_sock, char* file_name, char* description){
+void handle_create_tracker_com(int tracker_sock, char* file_name, char* description, char* ip_addr, int port_num){
     FILE* source_file = fopen(file_name, "r");
 
     if(source_file == NULL){
@@ -154,11 +155,13 @@ void handle_create_tracker_com(int tracker_sock, char* file_name, char* descript
 
     sprintf(
         msg_buffer,
-        "<createtracker %s %d %s %s>\n",
+        "<createtracker %s %d %s %s %s %d>\n",
         file_name,
         file_size,
         description,
-        md5_buf
+        md5_buf,
+        ip_addr,
+        port_num
     );
 
     send_msg(tracker_sock, msg_buffer);
@@ -170,7 +173,7 @@ void handle_create_tracker_com(int tracker_sock, char* file_name, char* descript
     fflush(stdout);
 }
 
-void handle_update_tracker_com(int tracker_sock, char* file_name, int start_bytes, long end_bytes) {
+void handle_update_tracker_com(int tracker_sock, char* file_name, long start_bytes, long end_bytes, char* ip_addr, int port_num) {
     //make copy of input string
     char* token;
     char* endptr;
@@ -186,10 +189,12 @@ void handle_update_tracker_com(int tracker_sock, char* file_name, int start_byte
 
     sprintf(
         msg,
-        "<updatetracker %s %d %ld>\n",
+        "<updatetracker %s %ld %ld %s %d>\n",
         file_name,
         start_bytes,
-        end_bytes
+        end_bytes,
+        ip_addr,
+        port_num
     );
 
     //send message to tracker
@@ -371,9 +376,7 @@ void handle_get_com(int tracker_sock, char* get_filename) {
     // wait for them to join back and place the received data in file and update tracker and give new assignment
     // if error, give them a new peer to download from
     // at end, check the md5 hash and restart if it messed up. then delete tracker file
-    }
-
-
+}
 
 void handle_command(char* str, int tracker_sock) {
     char* command = strtok(str, " ");
@@ -382,10 +385,44 @@ void handle_command(char* str, int tracker_sock) {
         handle_list_com(tracker_sock);
     } else if(strcmp(command, "create_tracker") == 0){
         char* file_name = strtok(NULL, " ");
+        if (file_name == NULL) {
+            printf("No filename provided");
+            return;
+        }
         char* description = strtok(NULL, " ");
+        if (description == NULL) {
+            printf("No description provided");
+            return;
+        }
+        char* ip_addr = strtok(NULL, " ");
+        if (ip_addr == NULL) {
+            printf("No IP Address provided.");
+            return;
+        }
+        int w, x, y, z, ip_len;
+        if (!(sscanf(ip_addr, "%d.%d.%d.%d%n", &w, &x, &y, &z, &ip_len) == 4 &&
+            ip_addr[ip_len] == '\0' &&
+            w >= 0 && w <= 255 &&
+            x >= 0 && x <= 255 &&
+            y >= 0 && y <= 255 &&
+            z >= 0 && z <= 255)) {
+            printf("IP Address is invalid.");
+            return;
+        }
+        char* temp = strtok(NULL, " ");
+        if (temp == NULL) {
+            printf("No port number provided.");
+            return;
+        }
+        int port_num = atoi(temp);
+        if (port_num < 0 || port_num > 65535) {
+            printf("Port number is invalid.");
+            return;
+        }
 
-        handle_create_tracker_com(tracker_sock, file_name, description);
-    } else if(strcmp(command, "update_tracker") == 0){
+        handle_create_tracker_com(tracker_sock, file_name, description, ip_addr, port_num);
+    } else if(strcmp(command, "update_tracker") == 0) {
+        char* endptr;
         char* file_name = strtok(NULL, " ");
         if (file_name == NULL) {
             printf("No filename provided");
@@ -396,14 +433,48 @@ void handle_command(char* str, int tracker_sock) {
             printf("No start byte provided.");
             return;
         }
-        int start_bytes = atoi(temp);
+        long start_bytes = strtol(temp, &endptr, 10);
+        if (temp == endptr || *endptr != '\0') {
+            printf("No valid start byte provided.");
+            return;
+        }
         temp = strtok(NULL, " ");
         if (temp == NULL) {
             printf("No end byte provided.");
             return;
         }
-        long end_bytes = atol(temp);
-        handle_update_tracker_com(tracker_sock, file_name, start_bytes, end_bytes);
+        long end_bytes = strtol(temp, &endptr, 10);
+        if (temp == endptr || *endptr != '\0') {
+            printf("No valid end byte provided.");
+            return;
+        }
+        char* ip_addr = strtok(NULL, " ");
+        if (ip_addr == NULL) {
+            printf("No IP Address provided.");
+            return;
+        }
+        int w, x, y, z, ip_len;
+        if (!(sscanf(ip_addr, "%d.%d.%d.%d%n", &w, &x, &y, &z, &ip_len) == 4 &&
+            ip_addr[ip_len] == '\0' &&
+            w >= 0 && w <= 255 &&
+            x >= 0 && x <= 255 &&
+            y >= 0 && y <= 255 &&
+            z >= 0 && z <= 255)) {
+            printf("IP Address is invalid.");
+            return;
+        }
+        temp = strtok(NULL, " ");
+        if (temp == NULL) {
+            printf("No port number provided.");
+            return;
+        }
+        int port_num = atoi(temp);
+        if (port_num < 0 || port_num > 65535) {
+            printf("Port number is invalid.");
+            return;
+        }
+
+        handle_update_tracker_com(tracker_sock, file_name, start_bytes, end_bytes, ip_addr, port_num);
     } else if(strcmp(command, "get") == 0) {
         char* get_filename = strtok(NULL, " ");
         handle_get_com(tracker_sock, get_filename);
