@@ -18,6 +18,8 @@
 #define MAX_PEERS 64
 #define MAX_THREADS 10
 
+
+
 void read_client_thread_config(int* tracker_port, char* tracker_address, int* n_seconds) {
     // read client thread config
     FILE* client_thread_config;
