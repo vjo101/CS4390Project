@@ -1,3 +1,4 @@
+#include <openssl/md5.h>
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -279,6 +280,7 @@ void handle_update_tracker_com(int tracker_sock, char* str) {
 }
 
 void read_tracker_file(char* filename, TrackerHeader* header, PeerEntry* peers) {
+    printf("reading");
     FILE *fptr = fopen(filename, "r");
 
     //store peer lines here
@@ -295,7 +297,7 @@ void read_tracker_file(char* filename, TrackerHeader* header, PeerEntry* peers) 
                 //sscanf with %s reads one whitespace delimited token after Filename:
                 sscanf(line, "Filename: %255s", header->filename);
             } else if (strncmp(line, "Filesize:", 9) == 0) {
-                char* temp;
+                char temp[64];
                 sscanf(line, "Filesize: %63s", temp);
                 header->filesize = atoll(temp);
             } else if (strncmp(line, "MD5:", 4) == 0) {
@@ -413,8 +415,10 @@ void handle_get_com(int tracker_sock, char* get_filename) {
     }
 
     PeerEntry peers[MAX_PEERS];
-    TrackerHeader *header;
 
+    TrackerHeader *header = malloc(sizeof(TrackerHeader));
+
+    printf("about to read");
     read_tracker_file(tracker_filename, header, peers);
 
     printf("ip: %s\n", peers[0].ip);
