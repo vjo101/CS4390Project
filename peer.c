@@ -35,6 +35,14 @@ typedef struct {
     struct sockaddr_in peer_addr;
 } HandlerArgs;
 
+typedef struct {
+    char* file_name;
+    long start_bytes;
+    long end_bytes;
+    char* ip_addr;
+    int port_num;
+} DownloadArgs;
+
 void read_client_thread_config(int* tracker_port, char* tracker_address, int* n_seconds) {
     // read client thread config
     FILE* client_thread_config;
@@ -506,13 +514,105 @@ void handle_get_com(int tracker_sock, char* get_filename) {
     // download threads must send: <GET filename start_byte end_byte>\n
     // where end_byte - start_byte + 1 <= 1024
     // response is raw bytes on success, or "<GET invalid>\n" on error
+
+// Could probably allocate what bytes the threads are going to get before called here?
+// Would be modification in thread creation at end of handle_get_com
 void* download_bytes(void* arg) {
-    // get bytes needed to download
-    // get offset
-    // get ip address
-    // get port
-    // request stuff from peer
+    DownloadArgs* download_args = (DownloadArgs*) arg;
+
+    int sock;
+    struct sockaddr_in peer_addr;
+
+    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        printf("Socket creation failed.");
+        return NULL;
+    }
+
+    peer_addr.sin_family = AF_INET;
+    peer_addr.sin_port = htons(download_args->port_num);
+    inet_pton(AF_INET, download_args->ip_addr, &peer_addr.sin_addr);
+
+    // establish connection to other peer
+    if (connect(sock, (struct sockaddr *) &peer_addr, sizeof(peer_addr)) < 0) {
+        printf("Socket connection failed.");
+        return NULL;
+    }
+
+    long total_bytes = download_args->end_bytes - download_args->start_bytes + 1;
+    long received_bytes = 0;
+
+    // make sure will only get a valid amount of bytes
+    if (total_bytes <= 0 || total_bytes > 1024) {
+        printf("Incorrect range of bytes.");
+        close(sock);
+        return NULL;
+    }
+
+    // request proper segment from the peer
+    char msg[256];
+    snprintf(msg, sizeof(msg), "<GET %s %ld %ld>\n", download_args->file_name, download_args->start_bytes, download_args->end_bytes);
+    write(sock, msg, strlen(msg));
+
+    //done to check if the get was invalid (is this the best way to do it?)
+    char check[64];
+    int start = read(sock, check, sizeof(check) - 1);
+
+    if (start <= 0) {
+        printf("Nothing from peer.");
+        close(sock);
+        return NULL;
+    }
+    check[start] = '\0';
+
+    // thread returns since it was an invalid command so nothing gets stored
+    if (strstr(check, "GET invalid") != NULL) {
+        printf("Invalid GET command to peer.");
+        close(sock);
+        return NULL;
+    }
+
+    // allocates for the segment downloaded
+    char* segment = malloc(total_bytes);
+    if (!segment) {
+        printf("Memory allocation failed.");
+        close(sock);
+        return NULL;
+    }
+
+    // adds in the first data read
+    int check_end = start;
+    if (check_end > 0) {
+        memcpy(segment, check, check_end);
+        received_bytes += check_end;
+    }
+
+    // read in segment from peer
+    while (received_bytes < total_bytes) {
+        int current;
+        if ((current = read(sock, segment + received_bytes, total_bytes - received_bytes)) < 0) {
+            printf("Reading failed.");
+            close(sock);
+            return NULL;
+        }
+
+        if (current <= 0) {
+            free(segment);
+            close(sock);
+            return NULL;
+        }
+
+        received_bytes += current;
+    }
+
+    if (received_bytes != total_bytes) {
+        printf("Received incorrect amount of bytes.");
+        free(segment);
+        close(sock);
+        return NULL;
+    }
     // return pointer to downloaded stuff or NULL if failed
+    close(sock);
+    return segment;
 };
 
 void handle_command(char* str, int tracker_sock) {
