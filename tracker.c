@@ -38,8 +38,8 @@ char TRACKER_DIR[256] = DEFAULT_TRACKER_DIR;
 void peer_handler(int sock_child, struct sockaddr_in client_addr);
 void handle_list_req(int sock);
 void handle_get_req(int sock, char *msg);
-void handle_createtracker_req(int sock, char* ip, int port, char *msg);
-void handle_updatetracker_req(int sock, char* ip, int port, char *msg);
+void handle_createtracker_req(int sock, char *msg);
+void handle_updatetracker_req(int sock, char *msg);
 int  read_config(int *port);
 
 
@@ -154,12 +154,12 @@ void peer_handler(int sock_child, struct sockaddr_in client_addr){
             printf("get request handled.\n");
         }
         else if((strstr(read_msg,"createtracker")!=NULL)||(strstr(read_msg,"Createtracker")!=NULL)||(strstr(read_msg,"CREATETRACKER")!=NULL)){// get command received
-            handle_createtracker_req(sock_child, client_ip, client_port, read_msg);
+            handle_createtracker_req(sock_child, read_msg);
             printf("createtracker request handled.\n");
 
         }
         else if((strstr(read_msg,"updatetracker")!=NULL)||(strstr(read_msg,"Updatetracker")!=NULL)||(strstr(read_msg,"UPDATETRACKER")!=NULL)){// get command received
-            handle_updatetracker_req(sock_child, client_ip, client_port, read_msg);
+            handle_updatetracker_req(sock_child, read_msg);
             printf("updatetracker request handled.\n");
         }
         else{
@@ -320,9 +320,10 @@ void handle_get_req(int sock, char *msg) {
 }
 
 //creates a new tracker file
-void handle_createtracker_req(int sock, char* ip, int port, char *msg) {
-    char filename[256], description[256], md5[64];
+void handle_createtracker_req(int sock, char *msg) {
+    char filename[256], description[256], md5[64], ip[64];
     long long filesize;
+    int port;
     char filepath[600];
     FILE *fp;
 
@@ -330,8 +331,8 @@ void handle_createtracker_req(int sock, char* ip, int port, char *msg) {
     printf("handling CREATETRACKER request\n");
 
     //parse msg, skipping <createtracker
-    if (sscanf(msg, "%*s %255s %lld %255s %63s",
-               filename, &filesize, description, md5) != 4) {
+    if (sscanf(msg, "%*s %255s %lld %255s %63s %63s %d",
+               filename, &filesize, description, md5, ip, &port) != 6) {
         printf("ERROR: failed to parse createtracker message: %s\n", msg);
         send_msg(sock, "<createtracker fail>\n");
         return;
@@ -373,17 +374,18 @@ void handle_createtracker_req(int sock, char* ip, int port, char *msg) {
 }
 
 //update a peers entry in a tracker file
-void handle_updatetracker_req(int sock, char* ip, int port, char *msg) {
-    char filename[256];
+void handle_updatetracker_req(int sock, char *msg) {
+    char filename[256], ip[64];
     long long start_bytes, end_bytes;
+    int port;
     char filepath[600];
     char response[512];
 
     printf("Handling UPDATETRACKER request\n");
 
     //parse the message
-    if (sscanf(msg, "%*s %255s %lld %lld",
-               filename, &start_bytes, &end_bytes) != 3) {
+    if (sscanf(msg, "%*s %255s %lld %lld %63s %d",
+               filename, &start_bytes, &end_bytes, ip, &port) != 5) {
         printf("ERROR: failed to parse updatetracker message: %s\n", msg);
         snprintf(response, sizeof(response), "<updatetracker %s fail>\n", filename);
         send_msg(sock, response);
