@@ -96,8 +96,9 @@ void get_self_ip(char* addr) {
         if (ifa->ifa_addr && ifa->ifa_addr->sa_family==AF_INET) {
             sa = (struct sockaddr_in *) ifa->ifa_addr;
             temp = inet_ntoa(sa->sin_addr);
+            printf("%s\n", temp);
             // check for local ip
-            if (strstr(temp, "192")) {
+            if (strstr(temp, "192") || strstr(temp, "10")) {
                 strcpy(addr, temp);
                 break;
             }
@@ -157,14 +158,28 @@ void* peer_handler(void* arg) {
         return NULL;
     }
 
-    // TODO: flock LOCK_SH, fseek to start_byte, fread chunk, flock LOCK_UN, fclose
+    // flock LOCK_SH, fseek to start_byte, fread chunk, flock LOCK_UN, fclose
     // flock guards against download threads (parent process) writing the same file
     // if bytes_read == 0, send "<GET invalid>\n" and close
 
-    // TODO: write raw bytes to sock, no wrapper, size already bounded to <= 1024
+    // fileno() converts to fd
+    // lock it so file isn't written to while reading
+    flock(fileno(fp), LOCK_SH);
+    char* chunk;
+    fread(chunk, chunk_size, 1, fp);
+    int n;
+    fseek(fp, start_byte, SEEK_SET);
+    n = fread(chunk, 1, chunk_size, fp);
+    if (n == 0) {
+        send_msg(sock, "<GET invalid>\n");
+        close(sock);
+        return NULL;
+    }
+    // write raw bytes to sock, no wrapper, size already bounded to <= 1024
     // print: "Serving <start>-<end> of <filename> to <peer_ip>\n"
+    send_msg(sock, chunk);
 
-    printf("Handling peer %d\n", sock);
+    printf("Serving %lld-%lld of %s to %s:%d", start_byte, end_byte, filename, inet_ntoa(peer_addr.sin_addr), peer_addr.sin_port);
     close(sock);
     return NULL;
 }
@@ -529,11 +544,11 @@ void handle_get_com(int tracker_sock, char* get_filename) {
             // get the ptr back. If null, reassign.
             // if not null, save data to file
             // update tracker
-        } 
+        }
     }
     // check md5. If incorrect, delete file and just recall this function
 }
-// TODO: function to send download request to 
+// TODO: function to send download request to
     // download threads must send: <GET filename start_byte end_byte>\n
     // where end_byte - start_byte + 1 <= 1024
     // response is raw bytes on success, or "<GET invalid>\n" on error
@@ -660,6 +675,7 @@ void handle_command(char* str, int tracker_sock) {
             return;
         }
         // easy way to get self ip addr when manually inputting
+        printf("global ip = %s\n", self_ip_addr);
         if (strcmp(ip_addr, "0") == 0) {
             ip_addr = self_ip_addr;
         }
@@ -672,7 +688,7 @@ void handle_command(char* str, int tracker_sock) {
             z >= 0 && z <= 255)) {
             printf("IP Address is invalid.");
             return;
-        } 
+        }
         char* temp = strtok(NULL, " ");
         if (temp == NULL) {
             printf("No port number provided.");
@@ -701,7 +717,7 @@ void handle_command(char* str, int tracker_sock) {
 
         pthread_create(&timed_update, NULL, handle_repeat_update_tracker, &update_args);
         pthread_join(timed_update, NULL);
-        
+
     } else if(strcmp(command, "update_tracker") == 0) {
         char* endptr;
         char* file_name = strtok(NULL, " ");

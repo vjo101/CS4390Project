@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS = -Wall
-LIBS = -lssl -lcrypto
+LIBS = -lssl -lcrypto -lm
 
 PEER_DIRS = peer1_dir peer2_dir peer3_dir
 TARGETS = peer1_dir/peer1 peer2_dir/peer2 peer3_dir/peer3
