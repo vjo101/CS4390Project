@@ -96,8 +96,9 @@ void get_self_ip(char* addr) {
         if (ifa->ifa_addr && ifa->ifa_addr->sa_family==AF_INET) {
             sa = (struct sockaddr_in *) ifa->ifa_addr;
             temp = inet_ntoa(sa->sin_addr);
+            printf("%s\n", temp);
             // check for local ip
-            if (strstr(temp, "192")) {
+            if (strstr(temp, "192") || strstr(temp, "10")) {
                 strcpy(addr, temp);
                 break;
             }
@@ -157,14 +158,28 @@ void* peer_handler(void* arg) {
         return NULL;
     }
 
-    // TODO: flock LOCK_SH, fseek to start_byte, fread chunk, flock LOCK_UN, fclose
+    // flock LOCK_SH, fseek to start_byte, fread chunk, flock LOCK_UN, fclose
     // flock guards against download threads (parent process) writing the same file
     // if bytes_read == 0, send "<GET invalid>\n" and close
 
-    // TODO: write raw bytes to sock, no wrapper, size already bounded to <= 1024
+    // fileno() converts to fd
+    // lock it so file isn't written to while reading
+    flock(fileno(fp), LOCK_SH);
+    char* chunk;
+    fread(chunk, chunk_size, 1, fp);
+    int n;
+    fseek(fp, start_byte, SEEK_SET);
+    n = fread(chunk, 1, chunk_size, fp);
+    if (n == 0) {
+        send_msg(sock, "<GET invalid>\n");
+        close(sock);
+        return NULL;
+    }
+    // write raw bytes to sock, no wrapper, size already bounded to <= 1024
     // print: "Serving <start>-<end> of <filename> to <peer_ip>\n"
+    send_msg(sock, chunk);
 
-    printf("Handling peer %d\n", sock);
+    printf("Serving %lld-%lld of %s to %s:%d", start_byte, end_byte, filename, inet_ntoa(peer_addr.sin_addr), peer_addr.sin_port);
     close(sock);
     return NULL;
 }
@@ -505,7 +520,7 @@ void handle_get_com(int tracker_sock, char* get_filename) {
     // create array for MAX_THREADS with pthread_t
     pthread_t thread[MAX_THREADS];
     PeerEntry assignments[MAX_THREADS];
-    int total_segments = ceil((double) header->filesize / MAXLINE);
+    int total_segments = ceil((double) (header->filesize) / (double) (MAXLINE));
     int last_seg_bytes = header->filesize % MAXLINE;
     int req_seg = 0;
     int down_seg = 0;
@@ -660,6 +675,7 @@ void handle_command(char* str, int tracker_sock) {
             return;
         }
         // easy way to get self ip addr when manually inputting
+        printf("global ip = %s\n", self_ip_addr);
         if (strcmp(ip_addr, "0") == 0) {
             ip_addr = self_ip_addr;
         }
