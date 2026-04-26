@@ -20,6 +20,8 @@ typedef struct {
     long timestamp;
 } PeerEntry;
 
+void print_peer_entry(const PeerEntry* p);
+
 typedef struct {
     char filename[256];
     char description[256];

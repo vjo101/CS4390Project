@@ -49,3 +49,13 @@ int pe_compare(const void *s1, const void *s2) {
         return -1;
     }
 }
+
+void print_peer_entry(const PeerEntry *p) {
+    printf("PeerEntry {\n");
+    printf("  ip: %s\n", p->ip);
+    printf("  port: %d\n", p->port);
+    printf("  start: %lld\n", p->start);
+    printf("  end: %lld\n", p->end);
+    printf("  timestamp: %ld\n", p->timestamp);
+    printf("}\n");
+}
