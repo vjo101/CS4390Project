@@ -305,7 +305,7 @@ void handle_get_req(int sock, char *msg) {
 
     //compute md5 of tracker file content
     //generate raw 16-byte digest
-    compute_md5_of_string((unsigned char*)file_content, bytes_read, md5_hex);
+    compute_md5_of_string(file_content, bytes_read, md5_hex);
 
     //send the response
     send_msg(sock, "<REP GET BEGIN>\n");

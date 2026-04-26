@@ -1,6 +1,8 @@
+#include <linux/prctl.h>
 #include <openssl/md5.h>
 #include <stdio.h>
 #include <sys/types.h>
+#include <errno.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <sys/stat.h>
@@ -17,11 +19,16 @@
 #include <ifaddrs.h>
 // for ceil
 #include <math.h>
+#include <sys/prctl.h>
+#include <signal.h>
 
 #define MAXLINE 1024
 #define BACKLOG_LENGTH 256
 #define MAX_PEERS 64
 #define MAX_THREADS 10
+#define DOWNLOAD_DIR "downloads"
+
+void* download_bytes(void* arg);
 
 
 // shared folder path read from serverThreadConfig.cfg, used by peer_handler threads to serve file chunks
@@ -31,6 +38,8 @@ int n_seconds;
 // should be long enough for address
 //
 char self_ip_addr[16];
+int  server_port;
+
 // args passed to each peer_handler thread (one per incoming peer connection)
 typedef struct {
     int sock;
@@ -93,12 +102,13 @@ void get_self_ip(char* addr) {
 
     getifaddrs(&ifap);
     for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
+
         if (ifa->ifa_addr && ifa->ifa_addr->sa_family==AF_INET) {
             sa = (struct sockaddr_in *) ifa->ifa_addr;
             temp = inet_ntoa(sa->sin_addr);
-            printf("%s\n", temp);
+
             // check for local ip
-            if (strstr(temp, "192") || strstr(temp, "10")) {
+            if (!strstr(temp, "127")) {
                 strcpy(addr, temp);
                 break;
             }
@@ -146,7 +156,8 @@ void* peer_handler(void* arg) {
 
     // open the requested file from this peer's shared folder
     char filepath[600];
-    snprintf(filepath, sizeof(filepath), "%s/%s", shared_folder, filename);
+    // snprintf(filepath, sizeof(filepath), "%s/%s", shared_folder, filename);
+    snprintf(filepath, sizeof(filepath), "%s", filename);
     printf("peer requested file: %s\n", filepath);
 
     // return error if filepath doesn't exist or can't be opened
@@ -165,7 +176,8 @@ void* peer_handler(void* arg) {
     // fileno() converts to fd
     // lock it so file isn't written to while reading
     flock(fileno(fp), LOCK_SH);
-    char* chunk;
+    char chunk[MAXLINE];
+
     fread(chunk, chunk_size, 1, fp);
     int n;
     fseek(fp, start_byte, SEEK_SET);
@@ -179,12 +191,12 @@ void* peer_handler(void* arg) {
     // print: "Serving <start>-<end> of <filename> to <peer_ip>\n"
     send_msg(sock, chunk);
 
-    printf("Serving %lld-%lld of %s to %s:%d", start_byte, end_byte, filename, inet_ntoa(peer_addr.sin_addr), peer_addr.sin_port);
+    printf("Serving %lld-%lld of %s to %s:%d\n", start_byte, end_byte, filename, inet_ntoa(peer_addr.sin_addr), peer_addr.sin_port);
     close(sock);
     return NULL;
 }
 
-void start_server(int port) {
+void start_server() {
     struct sockaddr_in server_addr, peer_addr;
 
     int sock_child;
@@ -199,7 +211,7 @@ void start_server(int port) {
     setsockopt(sockid, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port);
+    server_addr.sin_port = htons(server_port);
     server_addr.sin_addr.s_addr = htons(INADDR_ANY);
 
     // bind and check error
@@ -415,6 +427,7 @@ int read_tracker_file(char* filename, TrackerHeader* header, PeerEntry* peers) {
     fclose(fptr);
     return peer_count;
 }
+
 void handle_get_com(int tracker_sock, char* get_filename) {
     // WARN: did I do this right for snprintf? Or should i just use sprintf
     char req[MAXLINE];
@@ -432,18 +445,21 @@ void handle_get_com(int tracker_sock, char* get_filename) {
     int reading = 1;
     char sent_hash[33];
     char computed_hash[33];
-    // initiate md5 hashing
-    MD5_CTX mdContext;
-    MD5_Init(&mdContext);
-    // create file
+
+    // fstream for writing
     FILE *fptr;
-    // want to do write mode to overwrite any old tracker file data
-    fptr = fopen(tracker_filename, "w");
+
 
     while (reading) {
+
         if((n = read(tracker_sock, msg, sizeof(msg))) < 0){// read what server has said
             printf("Read failure\n");
             exit(1);
+        }
+
+        if(strstr(msg, "<GET invalid>") != NULL) {
+            printf("Found no tracker for file %s\n", get_filename);
+            return;
         }
 
         // TODO: add error handling
@@ -456,6 +472,10 @@ void handle_get_com(int tracker_sock, char* get_filename) {
             msg[n-16] = '\0';
             // update the length value
             n = n - 16;
+
+            // we actaully have a tracker to write
+            // want to do write mode to overwrite any old tracker file data
+            fptr = fopen(tracker_filename, "w");
         }
 
         // check if the closing value is present. If so, extract md5 hash and remover tail.
@@ -474,19 +494,14 @@ void handle_get_com(int tracker_sock, char* get_filename) {
             // stop reading from pipe since got everything
             reading = 0;
         }
-        // compute hash
-        MD5_Update(&mdContext, msg, n);
+
         // immediately save to file
-        fprintf (fptr, msg);
+        fprintf (fptr, "%s", msg);
 
         // check hash once done
         if (!reading) {
-            unsigned char raw[MD5_DIGEST_LENGTH];
-            MD5_Final(raw, &mdContext);
-            for (int i = 0; i < MD5_DIGEST_LENGTH; i++) {
-                sprintf(computed_hash + (i * 2), "%02x", raw[i]);
-            }
-            computed_hash[32] = '\0';
+            compute_md5_of_string(msg, n, computed_hash);
+
             if (strcmp(computed_hash, sent_hash) != 0) {
                 printf("Tracker file is corrupted. Please request it again\n");
                 fclose(fptr);
@@ -496,7 +511,6 @@ void handle_get_com(int tracker_sock, char* get_filename) {
                 fclose(fptr);
             }
         }
-
     }
 
     PeerEntry peers[MAX_PEERS];
@@ -504,6 +518,8 @@ void handle_get_com(int tracker_sock, char* get_filename) {
     TrackerHeader *header = malloc(sizeof(TrackerHeader));
 
     int peer_count = read_tracker_file(tracker_filename, header, peers);
+    printf("read the tracker file...\n");
+
     // TODO: test if this actually sorts
     qsort(peers, peer_count, sizeof(PeerEntry), pe_compare);
 
@@ -516,12 +532,26 @@ void handle_get_com(int tracker_sock, char* get_filename) {
     printf("Md5 = %s\n", header->md5);
     printf("Filesize = %lld\n", header->filesize);
 
+    // Open torrent file for writing
+    char filepath[600];
+    snprintf(filepath, sizeof(filepath), "%s/%s.track", DOWNLOAD_DIR, get_filename);
+
+    FILE *torrented;
+    torrented = fopen(filepath, "w");
+    if(torrented == NULL){
+        printf("Failed to create %s for torrenting.", header->filename);
+        return;
+    }
+
     // TODO: start requesting data from other peers
     // create array for MAX_THREADS with pthread_t
-    pthread_t thread[MAX_THREADS];
+    pthread_t threads[MAX_THREADS];
     PeerEntry assignments[MAX_THREADS];
+    DownloadArgs* threads_args[MAX_THREADS];
+
     int total_segments = ceil((double) header->filesize / MAXLINE);
     int last_seg_bytes = header->filesize % MAXLINE;
+
     int req_seg = 0;
     int down_seg = 0;
 
@@ -530,33 +560,92 @@ void handle_get_com(int tracker_sock, char* get_filename) {
     while (!finished) {
         // send out 10 threads with their assignments
         for (int i = 0; i < MAX_THREADS; i++) {
+
             if (req_seg == total_segments) {
                 break;
             }
+
             // find ideal peer to download this offset
             // send out threads with offset, ip address, port, amount to download
+            DownloadArgs* download_args = malloc (sizeof(DownloadArgs));
+            download_args->file_name = header->filename;
+            download_args->start_bytes = req_seg * MAXLINE;
+
+            download_args->end_bytes = download_args->start_bytes + MAXLINE;
+            if(download_args->end_bytes > header->filesize) {
+                download_args->end_bytes = header->filesize;
+            }
+
+            PeerEntry pe;
+            for(int j = 0; j < peer_count; j++){
+                pe = peers[j];
+                print_peer_entry(&pe);
+                if(pe.start <= download_args->start_bytes && pe.end >= download_args->end_bytes){
+                    // break;
+                }
+            }
+
+            download_args->ip_addr = pe.ip;
+            download_args->port_num = pe.port;
+
+            pthread_t tid;
+            pthread_create(&tid, NULL, download_bytes, (void*) download_args);
+
+            threads[i] = tid;
+            assignments[i] = pe;
+            threads_args[i] = download_args;
+
+            req_seg++;
+
         }
+
         // wait for threads to come back
         for (int i = 0; i < MAX_THREADS; i++) {
             if (down_seg == total_segments) {
+                finished = true;
                 break;
             }
+
             // get the ptr back. If null, reassign.
             // if not null, save data to file
             // update tracker
+            char* segment;
+            pthread_join(threads[i], (void**) &segment);
+
+            if(segment == NULL){
+                // TODO: huh
+            } else {
+                if(down_seg + 1 == total_segments) {
+                    fwrite(segment, 1, last_seg_bytes, torrented);
+                } else {
+                    fwrite(segment, 1, MAXLINE, torrented);
+                }
+
+                handle_update_tracker_com(tracker_sock, header->filename, 0, threads_args[i]->end_bytes, self_ip_addr, server_port);
+            }
+
+            down_seg++;
         }
     }
-    // check md5. If incorrect, delete file and just recall this function
+    fclose(torrented);
+
+    // TODO: check md5. If incorrect, delete file and just recall this function
 }
+
 // TODO: function to send download request to
     // download threads must send: <GET filename start_byte end_byte>\n
     // where end_byte - start_byte + 1 <= 1024
     // response is raw bytes on success, or "<GET invalid>\n" on error
 
-// Could probably allocate what bytes the threads are going to get before called here?
-// Would be modification in thread creation at end of handle_get_com
+// Could probably allocate what bytes the threads are going to get before called here? Would be modification in thread creation at end of handle_get_com
 void* download_bytes(void* arg) {
     DownloadArgs* download_args = (DownloadArgs*) arg;
+    printf("Fetching bytes %ld %ld of %s from %s:%d\n",
+           download_args->start_bytes,
+           download_args->end_bytes,
+           download_args->file_name,
+           download_args->ip_addr,
+           download_args->port_num);
 
     int sock;
     struct sockaddr_in peer_addr;
@@ -611,11 +700,6 @@ void* download_bytes(void* arg) {
 
     // allocates for the segment downloaded
     char* segment = malloc(total_bytes);
-    if (!segment) {
-        printf("Memory allocation failed.");
-        close(sock);
-        return NULL;
-    }
 
     // adds in the first data read
     int check_end = start;
@@ -625,16 +709,13 @@ void* download_bytes(void* arg) {
     }
 
     // read in segment from peer
-    while (received_bytes < total_bytes) {
+    printf("total bytes %ld\n", total_bytes);
+    while (received_bytes + 1 < total_bytes) {
+        printf("got here\n");
+
         int current;
         if ((current = read(sock, segment + received_bytes, total_bytes - received_bytes)) < 0) {
-            printf("Reading failed.");
-            close(sock);
-            return NULL;
-        }
-
-        if (current <= 0) {
-            free(segment);
+            printf("Reading failed.\n");
             close(sock);
             return NULL;
         }
@@ -642,12 +723,13 @@ void* download_bytes(void* arg) {
         received_bytes += current;
     }
 
-    if (received_bytes != total_bytes) {
+    if (received_bytes + 1 != total_bytes) {
         printf("Received incorrect amount of bytes.");
         free(segment);
         close(sock);
         return NULL;
     }
+
     // return pointer to downloaded stuff or NULL if failed
     close(sock);
     return segment;
@@ -655,6 +737,10 @@ void* download_bytes(void* arg) {
 
 void handle_command(char* str, int tracker_sock) {
     char* command = strtok(str, " ");
+
+    if(command == NULL){
+        return;
+    }
 
     if(strcmp(command, "list") == 0){
         handle_list_com(tracker_sock);
@@ -670,6 +756,7 @@ void handle_command(char* str, int tracker_sock) {
             return;
         }
         char* ip_addr = strtok(NULL, " ");
+
         if (ip_addr == NULL) {
             printf("No IP Address provided.");
             return;
@@ -705,18 +792,22 @@ void handle_command(char* str, int tracker_sock) {
         }
 
         handle_create_tracker_com(tracker_sock, file_name, description, ip_addr, port_num);
-        pthread_t timed_update;
 
-        RepeatUpdateArgs update_args;
-        update_args.tracker_sock = tracker_sock;
-        update_args.file_name = file_name;
-        update_args.start_bytes = start_bytes;
-        update_args.end_bytes = end_bytes;
-        update_args.ip_addr = ip_addr;
-        update_args.port_num = port_num;
-
-        pthread_create(&timed_update, NULL, handle_repeat_update_tracker, &update_args);
-        pthread_join(timed_update, NULL);
+        // TODO: this is not gonna work
+        // pthread_t timed_update;
+        //
+        // RepeatUpdateArgs update_args;
+        // update_args.tracker_sock = tracker_sock;
+        // update_args.file_name = file_name;
+        //
+        // update_args.start_bytes = start_bytes;
+        // update_args.end_bytes = end_bytes;
+        //
+        // update_args.ip_addr = ip_addr;
+        // update_args.port_num = port_num;
+        //
+        // pthread_create(&timed_update, NULL, handle_repeat_update_tracker, &update_args);
+        // pthread_join(timed_update, NULL);
 
     } else if(strcmp(command, "update_tracker") == 0) {
         char* endptr;
@@ -818,7 +909,7 @@ int connect_tracker_server(char* tracker_address, int tracker_port){
 int main(int argc,char *argv[]) {
     int tracker_port;
     char tracker_address[16];
-    int server_port;
+    int  n_seconds;
 
     read_client_thread_config(&tracker_port, tracker_address);
     read_server_thread_config(&server_port);
@@ -828,9 +919,16 @@ int main(int argc,char *argv[]) {
     printf("Peer server IP = %s\n", self_ip_addr);
     int tracker_sock = connect_tracker_server(tracker_address, tracker_port);
 
+    // create or ensure exists a downloads directory
+    if (mkdir(DOWNLOAD_DIR, 0755) == -1 && errno != EEXIST) {
+        printf("could not create tracker directory '%s'\n", DOWNLOAD_DIR);
+        exit(1);
+    }
+
     // fork peer so it can server any other peers that request stuff
     if(fork() == 0){
-        start_server(server_port);
+        prctl(PR_SET_PDEATHSIG, SIGTERM);
+        start_server();
     }
 
     char line[MAXLINE];
