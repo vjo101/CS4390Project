@@ -26,6 +26,8 @@
 
 // shared folder path read from serverThreadConfig.cfg, used by peer_handler threads to serve file chunks
 char shared_folder[256];
+int n_seconds;
+
 // should be long enough for address
 //
 char self_ip_addr[16];
@@ -35,6 +37,15 @@ typedef struct {
     struct sockaddr_in peer_addr;
 } HandlerArgs;
 
+// args passed to update_tracker when called after time
+typedef struct {
+    int tracker_sock;
+    char* file_name;
+    long start_bytes, end_bytes;
+    char* ip_addr;
+    int port_num;
+} RepeatUpdateArgs;
+
 typedef struct {
     char* file_name;
     long start_bytes;
@@ -43,7 +54,7 @@ typedef struct {
     int port_num;
 } DownloadArgs;
 
-void read_client_thread_config(int* tracker_port, char* tracker_address, int* n_seconds) {
+void read_client_thread_config(int* tracker_port, char* tracker_address) {
     // read client thread config
     FILE* client_thread_config;
     client_thread_config = fopen("clientThreadConfig.cfg", "r");
@@ -54,7 +65,7 @@ void read_client_thread_config(int* tracker_port, char* tracker_address, int* n_
         exit(1);
     }
 
-    fscanf(client_thread_config, "%d %s %d", tracker_port, tracker_address, n_seconds);
+    fscanf(client_thread_config, "%d %s %d", tracker_port, tracker_address, &n_seconds);
     fclose(client_thread_config);
 }
 
@@ -327,6 +338,18 @@ void handle_update_tracker_com(int tracker_sock, char* file_name, long start_byt
     }
 
     fflush(stdout);
+}
+
+//handles periodically updating trackers
+void* handle_repeat_update_tracker(void* args) {
+    RepeatUpdateArgs* update_args = (RepeatUpdateArgs*)args;
+    //could add command to terminate with a signal at end?
+    while (true) {
+        sleep(n_seconds);
+        handle_update_tracker_com(update_args->tracker_sock, update_args->file_name, update_args->start_bytes, update_args->end_bytes, update_args->ip_addr, update_args->port_num);
+    }
+
+    return NULL;
 }
 
 // returns number of peers read
@@ -666,6 +689,19 @@ void handle_command(char* str, int tracker_sock) {
         }
 
         handle_create_tracker_com(tracker_sock, file_name, description, ip_addr, port_num);
+        pthread_t timed_update;
+
+        RepeatUpdateArgs update_args;
+        update_args.tracker_sock = tracker_sock;
+        update_args.file_name = file_name;
+        update_args.start_bytes = start_bytes;
+        update_args.end_bytes = end_bytes;
+        update_args.ip_addr = ip_addr;
+        update_args.port_num = port_num;
+
+        pthread_create(&timed_update, NULL, handle_repeat_update_tracker, &update_args);
+        pthread_join(timed_update, NULL);
+        
     } else if(strcmp(command, "update_tracker") == 0) {
         char* endptr;
         char* file_name = strtok(NULL, " ");
@@ -766,10 +802,9 @@ int connect_tracker_server(char* tracker_address, int tracker_port){
 int main(int argc,char *argv[]) {
     int tracker_port;
     char tracker_address[16];
-    int  n_seconds;
     int server_port;
 
-    read_client_thread_config(&tracker_port, tracker_address, &n_seconds);
+    read_client_thread_config(&tracker_port, tracker_address);
     read_server_thread_config(&server_port);
     // get the ip
     get_self_ip(self_ip_addr);
