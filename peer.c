@@ -520,7 +520,7 @@ void handle_get_com(int tracker_sock, char* get_filename) {
     // create array for MAX_THREADS with pthread_t
     pthread_t thread[MAX_THREADS];
     PeerEntry assignments[MAX_THREADS];
-    int total_segments = ceil((double) (header->filesize) / (double) (MAXLINE));
+    int total_segments = ceil((double) header->filesize / MAXLINE);
     int last_seg_bytes = header->filesize % MAXLINE;
     int req_seg = 0;
     int down_seg = 0;
@@ -544,11 +544,11 @@ void handle_get_com(int tracker_sock, char* get_filename) {
             // get the ptr back. If null, reassign.
             // if not null, save data to file
             // update tracker
-        } 
+        }
     }
     // check md5. If incorrect, delete file and just recall this function
 }
-// TODO: function to send download request to 
+// TODO: function to send download request to
     // download threads must send: <GET filename start_byte end_byte>\n
     // where end_byte - start_byte + 1 <= 1024
     // response is raw bytes on success, or "<GET invalid>\n" on error
@@ -688,7 +688,7 @@ void handle_command(char* str, int tracker_sock) {
             z >= 0 && z <= 255)) {
             printf("IP Address is invalid.");
             return;
-        } 
+        }
         char* temp = strtok(NULL, " ");
         if (temp == NULL) {
             printf("No port number provided.");
@@ -717,7 +717,7 @@ void handle_command(char* str, int tracker_sock) {
 
         pthread_create(&timed_update, NULL, handle_repeat_update_tracker, &update_args);
         pthread_join(timed_update, NULL);
-        
+
     } else if(strcmp(command, "update_tracker") == 0) {
         char* endptr;
         char* file_name = strtok(NULL, " ");
