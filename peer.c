@@ -63,6 +63,12 @@ typedef struct {
     int port_num;
 } DownloadArgs;
 
+// testing for handle_repeat_tracker_update()
+// still have to account for undef amount of trackers
+// or just make it larger, using MAX_PEERS for convenience
+RepeatUpdateArgs update_list[MAX_PEERS];
+int tracker_count = 0;
+
 void print_download_args(const DownloadArgs *args) {
     printf("DownloadArgs {\n");
 
@@ -388,13 +394,19 @@ void handle_update_tracker_com(int tracker_sock, char* file_name, long start_byt
 
 //handles periodically updating trackers
 void* handle_repeat_update_tracker(void* args) {
-    RepeatUpdateArgs* update_args = (RepeatUpdateArgs*)args;
-    //could add command to terminate with a signal at end?
     while (true) {
         sleep(n_seconds);
-        handle_update_tracker_com(update_args->tracker_sock, update_args->file_name, update_args->start_bytes, update_args->end_bytes, update_args->ip_addr, update_args->port_num);
-    }
 
+        for (int i = 0; i < tracker_count; i++) {
+            handle_update_tracker_com(
+                update_list[i].tracker_sock,
+                update_list[i].file_name,
+                update_list[i].start_bytes,
+                update_list[i].end_bytes,
+                update_list[i].ip_addr,
+                update_list[i].port_num);
+        }
+    }
     return NULL;
 }
 
@@ -874,6 +886,23 @@ void handle_command(char* str, int tracker_sock) {
         // pthread_create(&timed_update, NULL, handle_repeat_update_tracker, &update_args);
         // pthread_join(timed_update, NULL);
 
+        // Another attempt, adding created tracker to update list
+        // Double check it works
+        if (tracker_count < MAX_PEERS) {
+            update_list[tracker_count].file_name = strdup(file_name);
+            update_list[tracker_count].start_bytes = 0;
+
+            struct stat st;
+            stat(file_name, &st);
+            update_list[tracker_count].tracker_sock = tracker_sock;
+            update_list[tracker_count].end_bytes = st.st_size - 1;
+            update_list[tracker_count].ip_addr = strdup(ip_addr);
+            update_list[tracker_count].port_num = port_num;
+            tracker_count++;
+        } else {
+            printf("Update list full.\n");
+        }
+        
     } else if(strcmp(command, "update_tracker") == 0) {
         char* endptr;
         char* file_name = strtok(NULL, " ");
@@ -990,6 +1019,11 @@ int main(int argc,char *argv[]) {
         exit(1);
     }
 
+    //create background thread to handle updating trackers
+    pthread_t update_thread;
+    pthread_create(&update_thread, NULL, handle_repeat_update_tracker, NULL);
+    pthread_detach(update_thread);
+    
     // fork peer so it can server any other peers that request stuff
     if(fork() == 0){
         prctl(PR_SET_PDEATHSIG, SIGTERM);
