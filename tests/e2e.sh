@@ -10,7 +10,8 @@ make
 
 echo "[*] Starting tracker"
 mkdir -p /tmp/tracker
-cp $PROJECT_ROOT/tracker /tmp/tracker
+cp $PROJECT_ROOT/tracker /tmp/tracker/
+cp $PROJECT_ROOT/sconfig /tmp/tracker/
 cd /tmp/tracker
 
 ./tracker > tracker.out 2>&1 &
