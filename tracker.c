@@ -1,3 +1,4 @@
+#include <fcntl.h>
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -20,6 +21,7 @@
 #include <stdint.h>
 #include <openssl/evp.h>
 #include "util.h"
+#include <sys/file.h>
 
 // buffer length
 #define BACKLOG_LENGTH 256
@@ -291,6 +293,7 @@ void handle_get_req(int sock, char *msg) {
 
     //open and read tracker file
     fp = fopen(filepath, "r");
+    flock(fileno(fp), LOCK_SH);
     if (fp == NULL) {
         printf("Error: tracker file not found %s\n", filepath);
         send_msg(sock, "<GET invalid>\n");
@@ -299,6 +302,7 @@ void handle_get_req(int sock, char *msg) {
 
     //read entire file into memory
     bytes_read = fread(file_content, 1, sizeof(file_content) - 1, fp);
+    flock(fileno(fp), LOCK_UN);
     fclose(fp);
     file_content[bytes_read]= '\0'; //null terminate
     printf("file content:\n%s", file_content);
@@ -403,6 +407,9 @@ void handle_updatetracker_req(int sock, char *msg) {
 
     //read the existing tracker file into memeory
     FILE *fp = fopen(filepath, "r");
+    // shared lock for reading
+
+    flock(fileno(fp), LOCK_SH);
     if (fp ==NULL) {
         printf("ERROR: could not open '%s' for reading\n", filepath);
         snprintf(response, sizeof(response), "<updatetracker %s fail>\n", filename);
@@ -457,6 +464,7 @@ void handle_updatetracker_req(int sock, char *msg) {
         //lines not parsed as peers are skipped
 
     }
+    flock(fileno(fp), LOCK_UN);
     fclose(fp);
 
     //add or update this peers entry
@@ -490,10 +498,13 @@ void handle_updatetracker_req(int sock, char *msg) {
 
     //rewrite the tracker file
     fp = fopen(filepath, "w");
+    flock(fileno(fp), LOCK_EX);
     if (fp == NULL) {
         printf("ERROR: could not open '%s' for writing\n", filepath);
         snprintf(response, sizeof(response), "<updatetracker %s fail>\n", filename);
         send_msg(sock, response);
+        flock(fileno(fp), LOCK_UN);
+        fclose(fp);
         return;
     }
 
@@ -510,6 +521,7 @@ void handle_updatetracker_req(int sock, char *msg) {
             peers[i].timestamp
         );
     }
+    flock(fileno(fp), LOCK_UN);
     fclose(fp);
 
     //send success reponse
