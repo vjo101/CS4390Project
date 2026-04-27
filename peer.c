@@ -26,7 +26,6 @@
 #define BACKLOG_LENGTH 256
 #define MAX_PEERS 64
 #define MAX_THREADS 10
-#define DOWNLOAD_DIR "downloads"
 
 void* download_bytes(void* arg);
 
@@ -125,7 +124,8 @@ void get_self_ip(char* addr) {
             temp = inet_ntoa(sa->sin_addr);
 
             // check for local ip
-            if (!strstr(temp, "127")) {
+            // WARN: change this if you want to find a certain type of ip address
+            if (strstr(temp, "100.")) {
                 strcpy(addr, temp);
                 break;
             }
@@ -174,7 +174,7 @@ void* peer_handler(void* arg) {
     // open the requested file from this peer's shared folder
     char filepath[600];
     // snprintf(filepath, sizeof(filepath), "%s/%s", shared_folder, filename);
-    snprintf(filepath, sizeof(filepath), "%s", filename);
+    snprintf(filepath, sizeof(filepath), "%s/%s", shared_folder, filename);
     printf("peer requested file: %s\n", filepath);
 
     // return error if filepath doesn't exist or can't be opened
@@ -192,7 +192,6 @@ void* peer_handler(void* arg) {
 
     // fileno() converts to fd
     // lock it so file isn't written to while reading
-    flock(fileno(fp), LOCK_SH);
     char chunk[MAXLINE];
 
     fread(chunk, chunk_size, 1, fp);
@@ -291,14 +290,16 @@ void handle_list_com(int tracker_sock){
 }
 
 void handle_create_tracker_com(int tracker_sock, char* file_name, char* description, char* ip_addr, int port_num){
-    FILE* source_file = fopen(file_name, "r");
+    char filepath[600];
+    snprintf(filepath, sizeof(filepath), "%s/%s", shared_folder, file_name);
+    FILE* source_file = fopen(filepath, "r");
 
     if(source_file == NULL){
-        printf("Could not open file %s\n", file_name);
+        printf("Could not open file %s\n", filepath);
     }
 
     struct stat st;
-    stat(file_name, &st);
+    stat(filepath, &st);
 
     int file_size = st.st_size;
 
@@ -317,6 +318,7 @@ void handle_create_tracker_com(int tracker_sock, char* file_name, char* descript
 
     char msg_buffer[256];
 
+    // just need to pass file_name here since you don't need the full file path
     sprintf(
         msg_buffer,
         "<createtracker %s %d %s %s %s %d>\n",
@@ -451,8 +453,8 @@ void handle_get_com(int tracker_sock, char* get_filename) {
     // WARN: did I do this right for snprintf? Or should i just use sprintf
     char req[MAXLINE];
     char tracker_filename[MAXLINE];
-    // check if they added .tracker or not and add .tracker if not added.
-    if (strstr(get_filename, ".tracker") == NULL) {
+    // check if they added .track or not and add .track if not added.
+    if (strstr(get_filename, ".track") == NULL) {
         snprintf(tracker_filename, MAXLINE, "%s.track", get_filename);
     }
     snprintf(req, MAXLINE, "GET %s", tracker_filename);
@@ -552,7 +554,7 @@ void handle_get_com(int tracker_sock, char* get_filename) {
 
     // Open torrent file for writing
     char filepath[600];
-    snprintf(filepath, sizeof(filepath), "%s/%s.track", DOWNLOAD_DIR, get_filename);
+    snprintf(filepath, sizeof(filepath), "%s/%s", shared_folder, get_filename);
 
     FILE *torrented;
     torrented = fopen(filepath, "w");
@@ -985,8 +987,8 @@ int main(int argc,char *argv[]) {
     int tracker_sock = connect_tracker_server(tracker_address, tracker_port);
 
     // create or ensure exists a downloads directory
-    if (mkdir(DOWNLOAD_DIR, 0755) == -1 && errno != EEXIST) {
-        printf("could not create tracker directory '%s'\n", DOWNLOAD_DIR);
+    if (mkdir(shared_folder, 0755) == -1 && errno != EEXIST) {
+        printf("could not create tracker directory '%s'\n", shared_folder);
         exit(1);
     }
 
