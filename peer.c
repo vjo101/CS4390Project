@@ -33,6 +33,7 @@ void* download_bytes(void* arg);
 // shared folder path read from serverThreadConfig.cfg, used by peer_handler threads to serve file chunks
 char shared_folder[256];
 int n_seconds;
+int peer_num = 0;
 
 // should be long enough for address
 //
@@ -152,6 +153,9 @@ void* peer_handler(void* arg) {
         return NULL;
     }
     read_msg[length] = '\0';
+    if (peer_num != 0) {
+        printf("Peer%d: ", peer_num);
+    }
     printf("received message: %s\n", read_msg);
 
     char filename[256];
@@ -175,6 +179,9 @@ void* peer_handler(void* arg) {
     char filepath[600];
     // snprintf(filepath, sizeof(filepath), "%s/%s", shared_folder, filename);
     snprintf(filepath, sizeof(filepath), "%s/%s", shared_folder, filename);
+    if (peer_num != 0) {
+        printf("Peer%d: ", peer_num);
+    }
     printf("peer requested file: %s\n", filepath);
 
     // return error if filepath doesn't exist or can't be opened
@@ -209,6 +216,9 @@ void* peer_handler(void* arg) {
 
     send_data(sock, chunk, chunk_size);
 
+    if (peer_num != 0) {
+        printf("Peer%d: ", peer_num);
+    }
     printf("Serving %lld-%lld of %s to %s:%d\n", start_byte, end_byte, filename, inet_ntoa(peer_addr.sin_addr), peer_addr.sin_port);
     close(sock);
     fclose(fp);
@@ -245,6 +255,9 @@ void start_server() {
         exit(1);
     }
 
+    if (peer_num != 0) {
+        printf("Peer%d: ", peer_num);
+    }
     printf("LISTENING FOR INCOMING REQUESTS.... \n");
 
     while(1) {
@@ -381,6 +394,9 @@ void handle_update_tracker_com(int tracker_sock, char* file_name, long start_byt
     if (strstr(confirm, "ferr")) {
         printf("Tracker file does not exist\n");
     } else if (strstr(confirm, "succ")) {
+        if (peer_num != 0) {
+            printf("Peer%d: ", peer_num);
+        }
         printf("Tracker file updated successfully\n");
     } else {
         printf("Could not update tracker file\n");
@@ -403,6 +419,9 @@ void* handle_repeat_update_tracker(void* args) {
 
 // returns number of peers read
 int read_tracker_file(char* filename, TrackerHeader* header, PeerEntry* peers) {
+    if (peer_num != 0) {
+        printf("Peer%d: ", peer_num);
+    }
     printf("reading");
     FILE *fptr = fopen(filename, "r");
 
@@ -528,6 +547,9 @@ void handle_get_com(int tracker_sock, char* get_filename) {
                 fclose(fptr);
                 remove(tracker_filename);
             } else {
+                if (peer_num != 0) {
+                    printf("Peer%d: ", peer_num);
+                }
                 printf("Tracker file successfully downloaded.\n");
                 fclose(fptr);
             }
@@ -539,6 +561,9 @@ void handle_get_com(int tracker_sock, char* get_filename) {
     TrackerHeader *header = malloc(sizeof(TrackerHeader));
 
     int peer_count = read_tracker_file(tracker_filename, header, peers);
+    if (peer_num != 0) {
+        printf("Peer%d: ", peer_num);
+    }
     printf("read the tracker file...\n");
 
     // TODO: test if this actually sorts
@@ -548,11 +573,6 @@ void handle_get_com(int tracker_sock, char* get_filename) {
         printf("addr: %s:%d\ntimestamp: %ld\n", peers[i].ip, peers[i].port, peers[i].timestamp);
     }
 
-    printf("ip: %s\n", peers[0].ip);
-    printf("Filename = %s\n", header->filename);
-    printf("Md5 = %s\n", header->md5);
-    printf("Filesize = %lld\n", header->filesize);
-
     // Open torrent file for writing
     char filepath[600];
     snprintf(filepath, sizeof(filepath), "%s/%s", shared_folder, get_filename);
@@ -560,6 +580,9 @@ void handle_get_com(int tracker_sock, char* get_filename) {
     FILE *torrented;
     torrented = fopen(filepath, "w");
     if(torrented == NULL){
+        if (peer_num != 0) {
+            printf("Peer%d: ", peer_num);
+        }
         printf("Failed to create %s for torrenting.", header->filename);
         return;
     }
@@ -628,6 +651,9 @@ void handle_get_com(int tracker_sock, char* get_filename) {
             }
 
             if(pe == NULL) {
+                if (peer_num != 0) {
+                    printf("Peer%d: ", peer_num);
+                }
                 printf("Could not find available peers to torrent from.\n");
 
                 // cancel and join amy started threads
@@ -694,6 +720,10 @@ void handle_get_com(int tracker_sock, char* get_filename) {
     }
     fclose(torrented);
     // TODO: check md5. If incorrect, delete file and just recall this function
+    if (peer_num != 0) {
+        printf("Peer%d: ", peer_num);
+    }
+    printf("Successfully torrented %s", get_filename);
 }
 
 // TODO: function to send download request to
@@ -708,6 +738,10 @@ void* download_bytes(void* arg) {
     pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
 
     DownloadArgs* download_args = (DownloadArgs*) arg;
+
+    if (peer_num != 0) {
+        printf("Peer%d: ", peer_num);
+    }
 
     printf("Fetching bytes %ld %ld of %s from %s:%d\n",
            download_args->start_bytes,
@@ -969,6 +1003,9 @@ int connect_tracker_server(char* tracker_address, int tracker_port){
         exit(1);
     }
 
+    if (peer_num != 0) {
+        printf("Peer%d: ", peer_num);
+    }
     printf("Connected to tracker sever %s:%d\n", tracker_address, tracker_port);
 
     return sockid;
@@ -984,6 +1021,13 @@ int main(int argc,char *argv[]) {
     // get the ip
     get_self_ip(self_ip_addr);
 
+    if (argc > 1) {
+        peer_num = atoi(argv[1]);
+    }
+
+    if (peer_num != 0) {
+        printf("Peer%d: ", peer_num);
+    }
     printf("Peer server IP = %s\n", self_ip_addr);
     int tracker_sock = connect_tracker_server(tracker_address, tracker_port);
 
