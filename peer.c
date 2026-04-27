@@ -194,13 +194,13 @@ void* peer_handler(void* arg) {
     // lock it so file isn't written to while reading
     char chunk[MAXLINE];
 
-    fread(chunk, chunk_size, 1, fp);
     int n;
     fseek(fp, start_byte, SEEK_SET);
     n = fread(chunk, 1, chunk_size, fp);
     if (n == 0) {
         send_msg(sock, "<GET invalid>\n");
         close(sock);
+        fclose(fp);
         return NULL;
     }
 
@@ -211,6 +211,7 @@ void* peer_handler(void* arg) {
 
     printf("Serving %lld-%lld of %s to %s:%d\n", start_byte, end_byte, filename, inet_ntoa(peer_addr.sin_addr), peer_addr.sin_port);
     close(sock);
+    fclose(fp);
     return NULL;
 }
 
