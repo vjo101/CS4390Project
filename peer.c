@@ -357,7 +357,7 @@ void handle_update_tracker_com(int tracker_sock, char* file_name, long start_byt
     //check end more than start
     if (end_bytes < start_bytes) {
         printf("Ending byte smaller than start byte\n");
-            exit(1);
+            //exit(1);
     }
 
     sprintf(
