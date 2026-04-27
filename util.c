@@ -1,4 +1,5 @@
 #include "util.h"
+#include <stdio.h>
 
 //turns data into a hex md5 string
 //md5 fills 16 byte array with the hash
@@ -21,21 +22,25 @@ void compute_md5_of_string(const char *data, size_t len, char *out_hex) {
     out_hex[32] = '\0';
 }
 
-//helper: write string to socket
-//handles partial writes for possible busy networks
-void send_msg(int sock, const char*msg) {
-    size_t len = strlen(msg);
+void send_data(int sock, const char* data, ssize_t len){
     size_t sent = 0;
 
     //keep writing until all bytes sent
     while (sent < len) {
-        ssize_t n = write(sock, msg + sent, len - sent);
+        ssize_t n = write(sock, data + sent, len - sent);
         if (n < 0){
             printf("ERROR: write() to socket failed\n");
             return;
         }
         sent += n;
     }
+}
+
+//helper: write string to socket
+//handles partial writes for possible busy networks
+void send_msg(int sock, const char*msg) {
+    size_t len = strlen(msg);
+    send_data(sock, msg, len);
 }
 
 int pe_compare(const void *s1, const void *s2) {

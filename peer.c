@@ -63,6 +63,23 @@ typedef struct {
     int port_num;
 } DownloadArgs;
 
+void print_download_args(const DownloadArgs *args) {
+    printf("DownloadArgs {\n");
+
+    printf("  file_name   : %s\n",
+           args->file_name ? args->file_name : "(null)");
+
+    printf("  start_bytes  : %ld\n", args->start_bytes);
+    printf("  end_bytes    : %ld\n", args->end_bytes);
+
+    printf("  ip_addr      : %s\n",
+           args->ip_addr ? args->ip_addr : "(null)");
+
+    printf("  port_num     : %d\n", args->port_num);
+
+    printf("}\n");
+}
+
 void read_client_thread_config(int* tracker_port, char* tracker_address) {
     // read client thread config
     FILE* client_thread_config;
@@ -187,9 +204,11 @@ void* peer_handler(void* arg) {
         close(sock);
         return NULL;
     }
+
     // write raw bytes to sock, no wrapper, size already bounded to <= 1024
     // print: "Serving <start>-<end> of <filename> to <peer_ip>\n"
-    send_msg(sock, chunk);
+
+    send_data(sock, chunk, chunk_size);
 
     printf("Serving %lld-%lld of %s to %s:%d\n", start_byte, end_byte, filename, inet_ntoa(peer_addr.sin_addr), peer_addr.sin_port);
     close(sock);
@@ -449,7 +468,6 @@ void handle_get_com(int tracker_sock, char* get_filename) {
     // fstream for writing
     FILE *fptr;
 
-
     while (reading) {
 
         if((n = read(tracker_sock, msg, sizeof(msg))) < 0){// read what server has said
@@ -546,57 +564,87 @@ void handle_get_com(int tracker_sock, char* get_filename) {
     // TODO: start requesting data from other peers
     // create array for MAX_THREADS with pthread_t
     pthread_t threads[MAX_THREADS];
-    PeerEntry assignments[MAX_THREADS];
-    DownloadArgs* threads_args[MAX_THREADS];
+    DownloadArgs threads_args[MAX_THREADS];
+    int peer_assignment_idxs[MAX_THREADS];
+
+    int broken_peer_idxs[MAX_PEERS];
+
+    int num_broken_peers = 0;
+
 
     int total_segments = ceil((double) header->filesize / MAXLINE);
     int last_seg_bytes = header->filesize % MAXLINE;
 
     int req_seg = 0;
     int down_seg = 0;
+    int num_launched_threads;
 
     bool finished = false;
     // open file
     while (!finished) {
         // send out 10 threads with their assignments
+        num_launched_threads = 0;
         for (int i = 0; i < MAX_THREADS; i++) {
 
             if (req_seg == total_segments) {
                 break;
             }
 
-            // find ideal peer to download this offset
-            // send out threads with offset, ip address, port, amount to download
-            DownloadArgs* download_args = malloc (sizeof(DownloadArgs));
+            DownloadArgs* download_args = &threads_args[i];
+
             download_args->file_name = header->filename;
             download_args->start_bytes = req_seg * MAXLINE;
 
-            download_args->end_bytes = download_args->start_bytes + MAXLINE;
+            download_args->end_bytes = download_args->start_bytes + MAXLINE - 1;
+
             if(download_args->end_bytes > header->filesize) {
-                download_args->end_bytes = header->filesize;
+                download_args->end_bytes = header->filesize - 1;
             }
 
-            PeerEntry pe;
+            // find ideal peer to download this offset
+            // send out threads with offset, ip address, port, amount to download
+            PeerEntry* pe = NULL;
+            bool is_broken;
+
             for(int j = 0; j < peer_count; j++){
-                pe = peers[j];
-                print_peer_entry(&pe);
-                if(pe.start <= download_args->start_bytes && pe.end >= download_args->end_bytes){
-                    // break;
+
+                is_broken = false;
+
+                for(int k = 0; k < num_broken_peers; k++){
+                    if(broken_peer_idxs[k] == j){
+                        is_broken = true;
+                    }
                 }
+
+                if(!is_broken && peers[j].start <= download_args->start_bytes && peers[j].end >= download_args->end_bytes){
+                    pe = &peers[j];
+                    peer_assignment_idxs[i] = j;
+                    break;
+                }
+
             }
 
-            download_args->ip_addr = pe.ip;
-            download_args->port_num = pe.port;
+            if(pe == NULL) {
+                printf("Could not find available peers to torrent from.\n");
+
+                // cancel and join amy started threads
+                for(int j = 0; j < num_launched_threads; j++){
+                    pthread_cancel(threads[j]);
+                    pthread_join(threads[j], NULL);
+                }
+                fclose(torrented);
+                return;
+            }
+
+            download_args->ip_addr = pe->ip;
+            download_args->port_num = pe->port;
 
             pthread_t tid;
             pthread_create(&tid, NULL, download_bytes, (void*) download_args);
 
             threads[i] = tid;
-            assignments[i] = pe;
-            threads_args[i] = download_args;
-
             req_seg++;
-
+            num_launched_threads++;
         }
 
         // wait for threads to come back
@@ -613,7 +661,20 @@ void handle_get_com(int tracker_sock, char* get_filename) {
             pthread_join(threads[i], (void**) &segment);
 
             if(segment == NULL){
-                // TODO: huh
+                // we mark peer as broken by adding to broken peer list if we return segment as null
+                broken_peer_idxs[num_broken_peers] = peer_assignment_idxs[i];
+                num_broken_peers++;
+
+                // then retry starting from last successfully downloaded segment
+                req_seg = down_seg;
+
+                // cancel and join remaining threads in thread group
+                for(int j = i + 1; j < num_launched_threads; j++){
+                    pthread_cancel(threads[j]);
+                    pthread_join(threads[j], NULL);
+                }
+
+                break;
             } else {
                 if(down_seg + 1 == total_segments) {
                     fwrite(segment, 1, last_seg_bytes, torrented);
@@ -621,14 +682,14 @@ void handle_get_com(int tracker_sock, char* get_filename) {
                     fwrite(segment, 1, MAXLINE, torrented);
                 }
 
-                handle_update_tracker_com(tracker_sock, header->filename, 0, threads_args[i]->end_bytes, self_ip_addr, server_port);
+                handle_update_tracker_com(tracker_sock, header->filename, 0, threads_args[i].end_bytes, self_ip_addr, server_port);
+                free(segment);
             }
 
             down_seg++;
         }
     }
     fclose(torrented);
-
     // TODO: check md5. If incorrect, delete file and just recall this function
 }
 
@@ -639,7 +700,12 @@ void handle_get_com(int tracker_sock, char* get_filename) {
 
 // Could probably allocate what bytes the threads are going to get before called here? Would be modification in thread creation at end of handle_get_com
 void* download_bytes(void* arg) {
+
+    // make cancelable
+    pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
+
     DownloadArgs* download_args = (DownloadArgs*) arg;
+
     printf("Fetching bytes %ld %ld of %s from %s:%d\n",
            download_args->start_bytes,
            download_args->end_bytes,
@@ -651,7 +717,7 @@ void* download_bytes(void* arg) {
     struct sockaddr_in peer_addr;
 
     if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        printf("Socket creation failed.");
+        printf("Socket creation failed.\n");
         return NULL;
     }
 
@@ -661,7 +727,7 @@ void* download_bytes(void* arg) {
 
     // establish connection to other peer
     if (connect(sock, (struct sockaddr *) &peer_addr, sizeof(peer_addr)) < 0) {
-        printf("Socket connection failed.");
+        printf("Socket connection failed.\n");
         return NULL;
     }
 
@@ -670,7 +736,7 @@ void* download_bytes(void* arg) {
 
     // make sure will only get a valid amount of bytes
     if (total_bytes <= 0 || total_bytes > 1024) {
-        printf("Incorrect range of bytes.");
+        printf("Incorrect range of bytes.\n");
         close(sock);
         return NULL;
     }
@@ -685,7 +751,7 @@ void* download_bytes(void* arg) {
     int start = read(sock, check, sizeof(check) - 1);
 
     if (start <= 0) {
-        printf("Nothing from peer.");
+        printf("Nothing from peer.\n");
         close(sock);
         return NULL;
     }
@@ -693,7 +759,7 @@ void* download_bytes(void* arg) {
 
     // thread returns since it was an invalid command so nothing gets stored
     if (strstr(check, "GET invalid") != NULL) {
-        printf("Invalid GET command to peer.");
+        printf("Invalid GET command to peer.\n");
         close(sock);
         return NULL;
     }
@@ -709,9 +775,8 @@ void* download_bytes(void* arg) {
     }
 
     // read in segment from peer
-    printf("total bytes %ld\n", total_bytes);
-    while (received_bytes + 1 < total_bytes) {
-        printf("got here\n");
+
+    while (received_bytes < total_bytes) {
 
         int current;
         if ((current = read(sock, segment + received_bytes, total_bytes - received_bytes)) < 0) {
@@ -723,8 +788,8 @@ void* download_bytes(void* arg) {
         received_bytes += current;
     }
 
-    if (received_bytes + 1 != total_bytes) {
-        printf("Received incorrect amount of bytes.");
+    if (received_bytes != total_bytes) {
+        printf("Received incorrect amount of bytes.\n");
         free(segment);
         close(sock);
         return NULL;

@@ -10,6 +10,7 @@
 
 void compute_md5_of_string(const char *data, size_t len, char *out_hex);
 void send_msg(int sock, const char *msg);
+void send_data(int sock, const char* data, ssize_t len);
 int pe_compare(const void *s1, const void *s2);
 
 typedef struct {
