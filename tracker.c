@@ -9,7 +9,7 @@
 // this is for constant INADDR_ANY?
 #include <netinet/ip.h>
 #include <netinet/in.h>
-// for fork() and stuff
+#include <pthread.h>
 #include <unistd.h>
 //for listening to torrent folder
 #include <dirent.h>
@@ -33,6 +33,7 @@
 
 //global directory path
 char TRACKER_DIR[256] = DEFAULT_TRACKER_DIR;
+static pthread_mutex_t file_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 //prototypes
 void peer_handler(int sock_child, struct sockaddr_in client_addr);
@@ -42,12 +43,22 @@ void handle_createtracker_req(int sock, char *msg);
 void handle_updatetracker_req(int sock, char *msg);
 int  read_config(int *port);
 
+typedef struct {
+    int sock;
+    struct sockaddr_in addr;
+} ClientArgs;
 
+static void *client_thread(void *arg) {
+    ClientArgs *ca = (ClientArgs *)arg;
+    peer_handler(ca->sock, ca->addr);
+    close(ca->sock);
+    free(ca);
+    return NULL;
+}
 
 int main() {
     // default value of server port
     int server_port = DEFAULT_PORT;
-    pid_t pid;
     struct sockaddr_in server_addr, client_addr;
     //socket for spefic clients
     int sock_child;
@@ -111,16 +122,19 @@ int main() {
         printf("new peer connected.\n");
         fflush(stdout);
 
-        //New child process will serve the requester client. separate child will serve separate client
-        if ((pid=fork())==0){
-            close(sockid);   //child does not need listener
-            peer_handler(sock_child, client_addr);//child is serving the client.
-            close (sock_child);
-            // printf("\n 1. closed");
-            exit(0);         // kill the process. child process all done with work
+        //New thread will serve the requester client. separate thread will serve separate client
+        ClientArgs *ca = malloc(sizeof(ClientArgs));
+        ca->sock = sock_child;
+        ca->addr = client_addr;
+
+        pthread_t tid;
+        if (pthread_create(&tid, NULL, client_thread, ca) != 0) {
+            perror("pthread_create");
+            close(sock_child);   //thread was not created, close here
+            free(ca);
+        } else {
+            pthread_detach(tid); // thread cleans up itself when done, no join needed
         }
-        // parent all done with client, only child will communicate with that client from now
-        close(sock_child);
 
     }  //accept loop ends
 } // main fun ends
@@ -341,8 +355,12 @@ void handle_createtracker_req(int sock, char *msg) {
     //check if tracker file already exists
     //tracker file name = original filename + ".track"
     snprintf(filepath, sizeof(filepath), "%s/%s.track", TRACKER_DIR, filename);
+
+    // lock around existence check + write so two threads can't race to create the same file
+    pthread_mutex_lock(&file_mutex);
     if (access(filepath, F_OK) == 0) {
         printf("createtracker FERR: tracker file '%s' already exists\n", filepath);
+        pthread_mutex_unlock(&file_mutex);
         send_msg(sock, "<createtracker ferr>\n");
         return;
     }
@@ -351,6 +369,7 @@ void handle_createtracker_req(int sock, char *msg) {
     fp = fopen(filepath, "w");
     if (fp == NULL) {
         printf("Error: could not create tracker file '%s'\n", filepath);
+        pthread_mutex_unlock(&file_mutex);
         send_msg(sock, "<createtracker fail>\n");
         return;
     }
@@ -366,6 +385,7 @@ void handle_createtracker_req(int sock, char *msg) {
     //WARN: Changed to filesize-1 since bytes are 0 indexed
     fprintf(fp, "%s:%d:0:%lld:%ld\n", ip, port, filesize-1, time(NULL));
     fclose(fp);
+    pthread_mutex_unlock(&file_mutex);
 
     printf("createtracker SUCC: created '%s' (peer: %s:%d)\n", filepath, ip, port);
 
@@ -401,10 +421,14 @@ void handle_updatetracker_req(int sock, char *msg) {
         return;
     }
 
+    // lock around read-modify-write so two threads can't corrupt the same tracker file
+    pthread_mutex_lock(&file_mutex);
+
     //read the existing tracker file into memeory
     FILE *fp = fopen(filepath, "r");
     if (fp ==NULL) {
         printf("ERROR: could not open '%s' for reading\n", filepath);
+        pthread_mutex_unlock(&file_mutex);
         snprintf(response, sizeof(response), "<updatetracker %s fail>\n", filename);
         send_msg(sock, response);
         return;
@@ -492,6 +516,7 @@ void handle_updatetracker_req(int sock, char *msg) {
     fp = fopen(filepath, "w");
     if (fp == NULL) {
         printf("ERROR: could not open '%s' for writing\n", filepath);
+        pthread_mutex_unlock(&file_mutex);
         snprintf(response, sizeof(response), "<updatetracker %s fail>\n", filename);
         send_msg(sock, response);
         return;
@@ -511,6 +536,7 @@ void handle_updatetracker_req(int sock, char *msg) {
         );
     }
     fclose(fp);
+    pthread_mutex_unlock(&file_mutex);
 
     //send success reponse
     snprintf(response, sizeof(response), "<updatetracker %s succ>\n", filename);
