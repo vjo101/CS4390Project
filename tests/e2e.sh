@@ -19,21 +19,21 @@ TRACKER_PID=$!
 PEER_PIDS=()
 
 cleanup() {
-    rm -rf "/tmp/tracker"
 
-    for i in {1..8}; do
-        rm -rf "/tmp/peer$i"
-    done;
-
-        # kill peers
+    # kill peers
     for pid in "${PEER_PIDS[@]}"; do
         kill "$pid" 2>/dev/null
     done
 
     # kill tracker
     kill "$TRACKER_PID" 2>/dev/null
-}
 
+    rm -rf "/tmp/tracker"
+
+    for i in {1..13}; do
+        rm -rf "/tmp/peer$i"
+    done;
+}
 
 create_range_of_peers(){
     local start=$1
@@ -87,6 +87,18 @@ for i in {3..8}; do
     echo "get $(basename $SMALL_FILE)" >> /tmp/peer$i/peer$i.in
     echo "get $(basename $BIG_FILE)" >> /tmp/peer$i/peer$i.in
 done;
+
+sleep 60
+
+
+create_range_of_peers 9 13
+for i in {9..13}; do
+    echo "[*] Getting files on peer$i"
+    echo "get $(basename $SMALL_FILE)" >> /tmp/peer$i/peer$i.in
+    echo "get $(basename $BIG_FILE)" >> /tmp/peer$i/peer$i.in
+done;
+
+sleep 60
 
 read -p "Press Enter to cleanup..."
 cleanup
