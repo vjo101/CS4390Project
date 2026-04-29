@@ -414,7 +414,7 @@ void* handle_repeat_update_tracker(void* args) {
 
 // returns number of peers read
 int read_tracker_file(char* filename, TrackerHeader* header, PeerEntry* peers) {
-    printf("reading");
+    printf("reading\n");
     FILE *fptr = fopen(filename, "r");
 
     //store peer lines here
@@ -552,7 +552,7 @@ void handle_get_com(int tracker_sock, char* get_filename) {
     int peer_count = read_tracker_file(tracker_filename, header, peers);
     printf("read the tracker file...\n");
 
-    // TODO: test if this actually sorts
+    // sort the peers by timestamp
     qsort(peers, peer_count, sizeof(PeerEntry), pe_compare);
 
     for (int i = 0; i < peer_count; i++) {
@@ -571,11 +571,11 @@ void handle_get_com(int tracker_sock, char* get_filename) {
     FILE *torrented;
     torrented = fopen(filepath, "w");
     if(torrented == NULL){
-        printf("Failed to create %s for torrenting.", header->filename);
+        printf("Failed to create %s for torrenting.\n", header->filename);
         return;
     }
 
-    // TODO: start requesting data from other peers
+    // start requesting data from other peers
     // create array for MAX_THREADS with pthread_t
     pthread_t threads[MAX_THREADS];
     DownloadArgs threads_args[MAX_THREADS];
@@ -704,15 +704,14 @@ void handle_get_com(int tracker_sock, char* get_filename) {
         }
     }
     fclose(torrented);
-    // TODO: check md5. If incorrect, delete file and just recall this function
+    // delete tracker file at end
+    remove(tracker_filename);
 }
 
-// TODO: function to send download request to
-    // download threads must send: <GET filename start_byte end_byte>\n
-    // where end_byte - start_byte + 1 <= 1024
-    // response is raw bytes on success, or "<GET invalid>\n" on error
-
-// Could probably allocate what bytes the threads are going to get before called here? Would be modification in thread creation at end of handle_get_com
+// function to send download request to
+// download threads must send: <GET filename start_byte end_byte>\n
+// where end_byte - start_byte + 1 <= 1024
+// response is raw bytes on success, or "<GET invalid>\n" on error
 void* download_bytes(void* arg) {
 
     // make cancelable
@@ -826,18 +825,18 @@ void handle_command(char* str, int tracker_sock) {
     } else if(strcmp(command, "create_tracker") == 0){
         char* file_name = strtok(NULL, " ");
         if (file_name == NULL) {
-            printf("No filename provided");
+            printf("No filename provided\n");
             return;
         }
         char* description = strtok(NULL, " ");
         if (description == NULL) {
-            printf("No description provided");
+            printf("No description provided\n");
             return;
         }
         char* ip_addr = strtok(NULL, " ");
 
         if (ip_addr == NULL) {
-            printf("No IP Address provided.");
+            printf("No IP Address provided.\n");
             return;
         }
         // easy way to get self ip addr when manually inputting
@@ -852,12 +851,12 @@ void handle_command(char* str, int tracker_sock) {
             x >= 0 && x <= 255 &&
             y >= 0 && y <= 255 &&
             z >= 0 && z <= 255)) {
-            printf("IP Address is invalid.");
+            printf("IP Address is invalid.\n");
             return;
         }
         char* temp = strtok(NULL, " ");
         if (temp == NULL) {
-            printf("No port number provided.");
+            printf("No port number provided.\n");
             return;
         }
         int port_num = atoi(temp);
@@ -866,7 +865,7 @@ void handle_command(char* str, int tracker_sock) {
             read_server_thread_config(&port_num);
         }
         if (port_num < 0 || port_num > 65535) {
-            printf("Port number is invalid.");
+            printf("Port number is invalid.\n");
             return;
         }
 
@@ -909,32 +908,32 @@ void handle_command(char* str, int tracker_sock) {
         char* endptr;
         char* file_name = strtok(NULL, " ");
         if (file_name == NULL) {
-            printf("No filename provided");
+            printf("No filename provided\n");
             return;
         }
         char* temp = strtok(NULL, " ");
         if (temp == NULL) {
-            printf("No start byte provided.");
+            printf("No start byte provided.\n");
             return;
         }
         long start_bytes = strtol(temp, &endptr, 10);
         if (temp == endptr || *endptr != '\0') {
-            printf("No valid start byte provided.");
+            printf("No valid start byte provided.\n");
             return;
         }
         temp = strtok(NULL, " ");
         if (temp == NULL) {
-            printf("No end byte provided.");
+            printf("No end byte provided.\n");
             return;
         }
         long end_bytes = strtol(temp, &endptr, 10);
         if (temp == endptr || *endptr != '\0') {
-            printf("No valid end byte provided.");
+            printf("No valid end byte provided.\n");
             return;
         }
         char* ip_addr = strtok(NULL, " ");
         if (ip_addr == NULL) {
-            printf("No IP Address provided.");
+            printf("No IP Address provided.\n");
             return;
         }
         // easy way to get self ip addr when manually inputting
@@ -948,12 +947,12 @@ void handle_command(char* str, int tracker_sock) {
             x >= 0 && x <= 255 &&
             y >= 0 && y <= 255 &&
             z >= 0 && z <= 255)) {
-            printf("IP Address is invalid.");
+            printf("IP Address is invalid.\n");
             return;
         }
         temp = strtok(NULL, " ");
         if (temp == NULL) {
-            printf("No port number provided.");
+            printf("No port number provided.\n");
             return;
         }
         int port_num = atoi(temp);
@@ -962,7 +961,7 @@ void handle_command(char* str, int tracker_sock) {
             read_server_thread_config(&port_num);
         }
         if (port_num < 0 || port_num > 65535) {
-            printf("Port number is invalid.");
+            printf("Port number is invalid.\n");
             return;
         }
 

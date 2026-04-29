@@ -8,7 +8,7 @@ TARGETS = peer1_dir/peer1 peer2_dir/peer2 peer3_dir/peer3
 all: tracker peer $(TARGETS)
 
 tracker: tracker.o util.o
-	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
+	$(CC) $(CFLAGS) -o $@ $^ $(LIBS) -lpthread
 
 tracker.o: tracker.c
 	$(CC) $(CFLAGS) -c $< -o $@
