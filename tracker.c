@@ -2,7 +2,6 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <errno.h>
-#include <sys/dir.h>
 #include <arpa/inet.h>
 #include <string.h>
 #include <stdlib.h>

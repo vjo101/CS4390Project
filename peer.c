@@ -10,7 +10,6 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
-#include <sys/file.h>
 #include "util.h"
 // for threads
 #include <pthread.h>
