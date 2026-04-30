@@ -5,16 +5,12 @@
 #include <arpa/inet.h>
 #include <string.h>
 #include <stdlib.h>
-// this is for constant INADDR_ANY?
 #include <netinet/ip.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <unistd.h>
-//for listening to torrent folder
 #include <dirent.h>
-// for mkdir and folder stuff
 #include <sys/stat.h>
-//timestamps
 #include <time.h>
 #include <stdint.h>
 #include <openssl/evp.h>
@@ -79,7 +75,8 @@ int main() {
 
     //create TCP socket
     //AF_INET = use IPv4 addresses
-    if ((sockid = socket(AF_INET,SOCK_STREAM,0)) < 0){ //create socket connection oriented
+    //create socket connection oriented
+    if ((sockid = socket(AF_INET,SOCK_STREAM,0)) < 0){
         printf("socket cannot be created \n");
         exit(1);
     }
@@ -107,7 +104,7 @@ int main() {
     }
     printf("Tracker SERVER READY TO LISTEN INCOMING REQUEST.... \n");
 
-    //accept  connection from every requester client
+    //accept connection from every requester client
     while(1) {
         socklen_t clilen = sizeof(client_addr);
         //wait until peer connects, then creates new socket (sock_child)
@@ -129,10 +126,12 @@ int main() {
         pthread_t tid;
         if (pthread_create(&tid, NULL, client_thread, ca) != 0) {
             perror("pthread_create");
-            close(sock_child);   //thread was not created, close here
+            // thread was not created, close here
+            close(sock_child);
             free(ca);
         } else {
-            pthread_detach(tid); // thread cleans up itself when done, no join needed
+            // thread cleans up itself when done, no join needed
+            pthread_detach(tid);
         }
 
     }  //accept loop ends
@@ -158,11 +157,12 @@ void peer_handler(int sock_child, struct sockaddr_in client_addr){
 
         printf("recieved message: %s\n", read_msg);
 
-        if (strstr(read_msg, "REQ LIST") != NULL || strstr(read_msg, "req list") != NULL) {//list command received
+        //list command received
+        if (strstr(read_msg, "REQ LIST") != NULL || strstr(read_msg, "req list") != NULL) {
             handle_list_req(sock_child);
             printf("list request handled.\n");
-        }
-        else if((strstr(read_msg,"get")!=NULL)||(strstr(read_msg,"GET")!=NULL)){// get command received
+        } // get command received
+        else if((strstr(read_msg,"get")!=NULL)||(strstr(read_msg,"GET")!=NULL)){
             handle_get_req(sock_child, read_msg);
             printf("get request handled.\n");
         }
@@ -267,9 +267,6 @@ void handle_list_req(int sock) {
     send_msg(sock, "<REP LIST END>\n");
 
     printf("LIST response sent: %d tracker file(s) found\n", count);
-
-
-
 }
 
 //sends content of specific tracker file
@@ -277,7 +274,8 @@ void handle_get_req(int sock, char *msg) {
 
     char requested_file[256];
     char filepath[600];
-    char file_content[MAXLINE * 20]; //tracker files are small
+    //tracker files are small
+    char file_content[MAXLINE * 20];
     char response[MAXLINE];
     char md5_hex[33];
     FILE *fp;
@@ -446,7 +444,8 @@ void handle_updatetracker_req(int sock, char *msg) {
     int peer_count = 0;
 
     char line[256];
-    int in_header = 1; //flag to chekc if still reading header
+    //flag to chekc if still reading header
+    int in_header = 1;
     time_t now = time(NULL);
 
     while (fgets(line, sizeof(line), fp) != NULL) {
@@ -559,7 +558,8 @@ int read_config(int *port) {
 
     //line 1 is port number
     if (fgets(line, sizeof(line), fp) == NULL) { fclose(fp); return -1; }
-    *port = atoi(line); // atoi converts "3490\n" → 3490
+    // atoi converts "3490\n" → 3490
+    *port = atoi(line);
 
     //line 2 is tracker shared directory written into global TRACKER_DIR
     if (fgets(line, sizeof(line), fp) == NULL) { fclose(fp); return -1; }

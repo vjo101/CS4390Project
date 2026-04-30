@@ -11,12 +11,9 @@
 #include <stdlib.h>
 #include <arpa/inet.h>
 #include "util.h"
-// for threads
 #include <pthread.h>
 #include <stdbool.h>
-// for getting ip address
 #include <ifaddrs.h>
-// for ceil
 #include <math.h>
 #include <sys/prctl.h>
 #include <signal.h>
@@ -28,13 +25,11 @@
 
 void* download_bytes(void* arg);
 
-
 // shared folder path read from serverThreadConfig.cfg, used by peer_handler threads to serve file chunks
 char shared_folder[256];
 int n_seconds;
 
 // should be long enough for address
-//
 char self_ip_addr[16];
 int  server_port;
 
@@ -61,9 +56,7 @@ typedef struct {
     int port_num;
 } DownloadArgs;
 
-// testing for handle_repeat_tracker_update()
-// still have to account for undef amount of trackers
-// or just make it larger, using MAX_PEERS for convenience
+// creates array to keep trackers to then manage updating
 RepeatUpdateArgs update_list[MAX_PEERS];
 int tracker_count = 0;
 
@@ -191,16 +184,12 @@ void* peer_handler(void* arg) {
         return NULL;
     }
 
-    // flock LOCK_SH, fseek to start_byte, fread chunk, flock LOCK_UN, fclose
-    // flock guards against download threads (parent process) writing the same file
-    // if bytes_read == 0, send "<GET invalid>\n" and close
-
-    // fileno() converts to fd
-    // lock it so file isn't written to while reading
     char chunk[MAXLINE];
 
     int n;
     fseek(fp, start_byte, SEEK_SET);
+
+    // if bytes_read == 0, send "<GET invalid>\n" and close
     n = fread(chunk, 1, chunk_size, fp);
     if (n == 0) {
         send_msg(sock, "<GET invalid>\n");
@@ -211,7 +200,6 @@ void* peer_handler(void* arg) {
 
     // write raw bytes to sock, no wrapper, size already bounded to <= 1024
     // print: "Serving <start>-<end> of <filename> to <peer_ip>\n"
-
     send_data(sock, chunk, chunk_size);
 
     printf("Serving %lld-%lld of %s to %s:%d\n", start_byte, end_byte, filename, inet_ntoa(peer_addr.sin_addr), peer_addr.sin_port);
@@ -226,7 +214,8 @@ void start_server() {
     int sock_child;
     int sockid;
 
-    if ((sockid = socket(AF_INET,SOCK_STREAM,0)) < 0){ //create socket connection oriented
+    //create socket connection oriented
+    if ((sockid = socket(AF_INET,SOCK_STREAM,0)) < 0){
         printf("socket cannot be created \n");
         exit(1);
     }
@@ -286,7 +275,8 @@ void handle_list_com(int tracker_sock){
     char msg[MAXLINE];
 
     ssize_t n;
-    if((n = read(tracker_sock, msg, sizeof(msg))) < 0){// read what server has said
+    // read what server has said
+    if((n = read(tracker_sock, msg, sizeof(msg))) < 0){
         printf("Read failure\n");
         exit(1);
     }
@@ -324,7 +314,7 @@ void handle_create_tracker_com(int tracker_sock, char* file_name, char* descript
 
     char msg_buffer[256];
 
-    // just need to pass file_name here since you don't need the full file path
+    // formats message to tracker
     sprintf(
         msg_buffer,
         "<createtracker %s %d %s %s %s %d>\n",
@@ -350,13 +340,10 @@ void handle_update_tracker_com(int tracker_sock, char* file_name, long start_byt
     char* token;
     char* endptr;
     char msg[256];
-    //strncpy(msg, str, sizeof(msg) - 1);
-    //msg[sizeof(msg) - 1] = '\0';
 
     //check end more than start
     if (end_bytes < start_bytes) {
         printf("Ending byte smaller than start byte\n");
-            //exit(1);
     }
 
     sprintf(
@@ -417,12 +404,13 @@ int read_tracker_file(char* filename, TrackerHeader* header, PeerEntry* peers) {
     printf("reading\n");
     FILE *fptr = fopen(filename, "r");
 
-    //store peer lines here
-    //each peer line: ip:port:start:end:timestamp
     int peer_count = 0;
 
+    //store peer lines here
+    //each peer line: ip:port:start:end:timestamp
     char line[256];
-    int in_header = 1; //flag to chekc if still reading header
+    //flag to chekc if still reading header
+    int in_header = 1;
 
     while (fgets(line, sizeof(line), fptr) != NULL) {
         //header lines start with captial letter keyword or '#'
@@ -449,7 +437,6 @@ int read_tracker_file(char* filename, TrackerHeader* header, PeerEntry* peers) {
         memset(&pe, 0, sizeof(pe));
         if (sscanf(line, "%63[^:]:%d:%lld:%lld:%ld", pe.ip, &pe.port, &pe.start, &pe.end, &pe.timestamp) == 5){
             //add to peers array if theres room
-            //
             if (peer_count < MAX_PEERS) {
                 peers[peer_count++] = pe;
             }
@@ -462,7 +449,6 @@ int read_tracker_file(char* filename, TrackerHeader* header, PeerEntry* peers) {
 }
 
 void handle_get_com(int tracker_sock, char* get_filename) {
-    // WARN: did I do this right for snprintf? Or should i just use sprintf
     char req[MAXLINE];
     char tracker_filename[MAXLINE];
     // check if they added .track or not and add .track if not added.
@@ -484,7 +470,8 @@ void handle_get_com(int tracker_sock, char* get_filename) {
 
     while (reading) {
 
-        if((n = read(tracker_sock, msg, sizeof(msg))) < 0){// read what server has said
+        // read what server has said
+        if((n = read(tracker_sock, msg, sizeof(msg))) < 0){
             printf("Read failure\n");
             exit(1);
         }
@@ -494,31 +481,27 @@ void handle_get_com(int tracker_sock, char* get_filename) {
             return;
         }
 
-        // TODO: add error handling
-        // WARN: doesn't actually check if the first lin is "<REP GET BEGIN>"
         // if the beginning of transmission discard the beginning
         if(strstr(msg, "<REP GET BEGIN>\n") != NULL) {
-            // WARN: hardcoded value for header length
             memmove(msg, msg + 16, n - 16);
             // add null terminator at end since it just copied message, it didn't remove the left overs.
             msg[n-16] = '\0';
             // update the length value
             n = n - 16;
 
-            // we actaully have a tracker to write
+            // we actually have a tracker to write
             // want to do write mode to overwrite any old tracker file data
             fptr = fopen(tracker_filename, "w");
         }
 
         // check if the closing value is present. If so, extract md5 hash and remover tail.
-        // WARN: what if the footer is split between two messages? can that happen?
         if(strstr(msg, "<REP GET END") != NULL) {
             // extract hash
             char* start_of_hash = msg + n - 34;
             memmove(sent_hash, start_of_hash, 32);
             sent_hash[32] = '\0';
             // remove tail
-            // need to remove last 47 bytes to get rid of footer. Is there a better way to do this?
+            // need to remove last 47 bytes to get rid of footer
             memmove(msg, msg, n - 47);
             msg[n-47] = '\0';
             // update length after cutting it short
@@ -708,10 +691,7 @@ void handle_get_com(int tracker_sock, char* get_filename) {
     remove(tracker_filename);
 }
 
-// function to send download request to
-// download threads must send: <GET filename start_byte end_byte>\n
-// where end_byte - start_byte + 1 <= 1024
-// response is raw bytes on success, or "<GET invalid>\n" on error
+// function for threads to download from peer
 void* download_bytes(void* arg) {
 
     // make cancelable
@@ -759,7 +739,7 @@ void* download_bytes(void* arg) {
     snprintf(msg, sizeof(msg), "<GET %s %ld %ld>\n", download_args->file_name, download_args->start_bytes, download_args->end_bytes);
     write(sock, msg, strlen(msg));
 
-    //done to check if the get was invalid (is this the best way to do it?)
+    // done to check if the get was invalid
     char check[64];
     int start = read(sock, check, sizeof(check) - 1);
 
@@ -788,7 +768,6 @@ void* download_bytes(void* arg) {
     }
 
     // read in segment from peer
-
     while (received_bytes < total_bytes) {
 
         int current;
@@ -860,7 +839,7 @@ void handle_command(char* str, int tracker_sock) {
             return;
         }
         int port_num = atoi(temp);
-        // eady way to get port number
+        // easy way to get port number
         if (port_num == 0) {
             read_server_thread_config(&port_num);
         }
@@ -870,25 +849,7 @@ void handle_command(char* str, int tracker_sock) {
         }
 
         handle_create_tracker_com(tracker_sock, file_name, description, ip_addr, port_num);
-
-        // TODO: this is not gonna work
-        // pthread_t timed_update;
-        //
-        // RepeatUpdateArgs update_args;
-        // update_args.tracker_sock = tracker_sock;
-        // update_args.file_name = file_name;
-        //
-        // update_args.start_bytes = start_bytes;
-        // update_args.end_bytes = end_bytes;
-        //
-        // update_args.ip_addr = ip_addr;
-        // update_args.port_num = port_num;
-        //
-        // pthread_create(&timed_update, NULL, handle_repeat_update_tracker, &update_args);
-        // pthread_join(timed_update, NULL);
-
-        // Another attempt, adding created tracker to update list
-        // Double check it works
+        // adds created tracker to update list
         if (tracker_count < MAX_PEERS) {
             update_list[tracker_count].file_name = strdup(file_name);
             update_list[tracker_count].start_bytes = 0;
@@ -956,7 +917,7 @@ void handle_command(char* str, int tracker_sock) {
             return;
         }
         int port_num = atoi(temp);
-        // eady way to get port number
+        // easy way to get port number
         if (port_num == 0) {
             read_server_thread_config(&port_num);
         }
@@ -978,18 +939,20 @@ int connect_tracker_server(char* tracker_address, int tracker_port){
     int sockid;
     struct sockaddr_in tracker_addr;
 
-    //create socket
+    // create socket
     if ((sockid = socket(AF_INET,SOCK_STREAM,0))==-1){
         printf("Socket cannot be created\\n");
         exit(0);
     }
 
-    tracker_addr.sin_family = AF_INET; //host byte order
-    tracker_addr.sin_port = htons(tracker_port); // convert to network byte order
+    // host byte order
+    tracker_addr.sin_family = AF_INET;
+    // convert to network byte order
+    tracker_addr.sin_port = htons(tracker_port);
 
     inet_pton(AF_INET, tracker_address, &tracker_addr.sin_addr);
 
-    //connect and error check
+    // connect and error check
     if (connect(sockid ,(struct sockaddr *) &tracker_addr,sizeof(struct sockaddr))==-1){
 
         printf("Cannot connect to tracker server\n");
