@@ -11,12 +11,9 @@
 #include <stdlib.h>
 #include <arpa/inet.h>
 #include "util.h"
-// for threads
 #include <pthread.h>
 #include <stdbool.h>
-// for getting ip address
 #include <ifaddrs.h>
-// for ceil
 #include <math.h>
 #include <sys/prctl.h>
 #include <signal.h>
@@ -27,7 +24,6 @@
 #define MAX_THREADS 10
 
 void* download_bytes(void* arg);
-
 
 // shared folder path read from serverThreadConfig.cfg, used by peer_handler threads to serve file chunks
 char shared_folder[256];
